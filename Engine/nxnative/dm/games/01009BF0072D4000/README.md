@@ -12,7 +12,7 @@ On the Mac: the opening course, the cutscene that follows it and the title menu;
 | `pad_layout full` | `game.tsv` | the virtual gamepad starts in the 3D layout: the right stick turns the camera |
 | 4 GB layout: `mem_reserve 0x100000000`, `mem_alias 0x10000000`, `mem_stack 0x10000000`, `app_pool 0xCD500000` | `game.tsv` | no system resource in the NPDM: the game sets a 3.00 GB heap (pool − 64 MB). `main`'s bss is only 1.4 MB. 13 Sentinels' partition, as the other EPD games without virtual address memory |
 
-No `patches.py`, no `dm/tools/sdk_patches.py` cut for its `sdk` build (`3ae34e68…`).
+No `patches.py`; `dm/tools/sdk_patches.py`'s SDK-wide rules cut its `sdk` build (`3ae34e68…`): the node area and 2 MB alignment of large regions.
 
 ## Rendering
 

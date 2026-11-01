@@ -29,13 +29,19 @@ def patch_controller(root):
     ):
         path = root/name
         text = path.read_text()
-        if text.count(old) != 1:
+        legacy = old+'   // by position: right A, bottom B, top X, left Y'
+        shared = 'uint64_t m = dm_pad_face(g);   // by position, a Nintendo pad by its labels'
+        include = '#include "haptics_apple.h"'
+        if text.count(include) != 1 or text.count(legacy) + text.count(shared) != 1:
             raise RuntimeError('Upstream controller interface changed: '+name)
-        text = text.replace('#include "haptics_apple.h"', '#include "haptics_apple.h"\n#include "controller_native.h"')
-        text = text.replace(old+'   // by position: right A, bottom B, top X, left Y', 'm |= luma_face_buttons(g);   // automatic Nintendo / Xbox / PS semantics')
+        text = text.replace(include, include+'\n#include "controller_native.h"')
+        text = text.replace(legacy, 'm |= luma_face_buttons(g);   // automatic Nintendo / Xbox / PS semantics')
+        text = text.replace(shared, 'uint64_t m = luma_face_buttons(g);   // automatic Nintendo / Xbox / PS semantics')
         text = text.replace('// Controllers: buttons by position as on the iPhone (right A, bottom B, top X, left Y),', '// Controllers: automatic Nintendo / Xbox / PS face-button semantics,')
+        text = text.replace('face buttons as on the iPhone, by position (right A, bottom B, top X, left Y) or on a Nintendo pad by its labels (pad_apple.h)', 'automatic Nintendo / Xbox / PS face-button semantics (controller_native.h)')
+        text = text.replace('map by position: bottom = B, right = A, left = Y, top = X (same positions as on a Switch controller); a Nintendo pad maps by its labels (pad_apple.h).', 'use automatic Nintendo / Xbox / PS semantics (controller_native.h).')
         text = text.replace('map by position: bottom = B, right = A, left = Y, top = X (same positions as on a Switch controller).', 'use automatic Nintendo / Xbox / PS semantics (controller_native.h).')
-        if old in text or text.count('luma_face_buttons(g)') != 1:
+        if old in text or 'dm_pad_face(g)' in text or text.count('luma_face_buttons(g)') != 1:
             raise RuntimeError('Controller patch did not apply cleanly: '+name)
         path.write_text(text)
 

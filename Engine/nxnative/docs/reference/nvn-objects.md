@@ -27,6 +27,14 @@ The game may also write into an NVN object directly, without an NVN call, throug
 - **Found on:** [Super Mario Bros. Wonder](../../dm/games/010015100B514000/README.md).
 - **Check:** to find such writes, put the field you suspect behind a guard value and log when it changes outside the host's own code, or force overflows on the Mac by shrinking the command memory the game gets.
 
+### Guest ring allocators write `NVNbuffer` offset and size directly
+
+- **Symptom:** a running game with sound draws a black screen; every uniform buffer returns the same initialized address, with its allocation offset reported as its size.
+- **Cause:** an engine can retarget an initialized buffer with direct 64-bit stores to `NVNbuffer` +0x18 (offset) and +0x20 (size), then bind `nvnBufferGetAddress` and `nvnBufferGetSize`. The host previously stored offset at +0x10 and size at +0x18: the guest's offset overwrote the host's size while its address stayed unchanged.
+- **Fix:** `buf_t` reserves the bytes before +0x18 and puts offset and size at the guest-written offsets, with compile-time assertions. Initialization and every buffer query use that record; CPU mapping still respects the pool's CPU-access flags. The record fits the existing 0x30-byte `NVNbuffer`; the builder layout and recorded command layouts are unchanged. No meaning is assigned to the reserved driver bytes.
+- **Found on:** [LEGO Star Wars: The Skywalker Saga, issue #723](https://github.com/seedds/nxnative/issues/723), 1.10.0, SDK 12.3.6, main build `ec593a5f9552100a9fe95c4ca9e34873` (reporter's trace). This is a general object ABI correction; no game profile is needed.
+- **Check:** `t_nvn.c` initializes a buffer through the public API, retargets it repeatedly with raw byte writes, and checks address, size, mapping, pool and offset queries, builder independence and neighbouring-object guards. It also retargets a CPU-inaccessible buffer. Validation uses synthetic memory only; the reported game's rendering has not been retested.
+
 ### Sizes the hardware never reports as 0 (ZCull save area)
 
 - **Symptom:** sprites broke apart in some runs only, depending on the allocation order; buffers overlapped.
@@ -153,12 +161,19 @@ The game may also write into an NVN object directly, without an NVN call, throug
 
 ## Command memory
 
+### Control memory capacity queries
+
+- **Symptom:** `[RED] NVN unimplemented function called: nvnCommandBufferGetControlMemoryFree` (or `…GetControlMemorySize`) once, after the game gives a command buffer control memory.
+- **Cause:** `AddControlMemory` was a no-op, and the size and free getters reached the unimplemented stub, which returns 0, so a game that checks the free space sees none left. The host writes its records only to command memory and uses no byte of the game's control memory, so in NVN's terms (size = used + free) the whole block stays free.
+- **Fix:** `cmd_t` records the size of the last `AddControlMemory` block and returns it from both `GetControlMemoryFree` and `GetControlMemorySize`; `GetControlMemoryUsed` stays 0. `t_nvn` checks the values before any block, after one, after a recording and after a smaller block replaces it.
+- **Found on:** South Park: The Fractured But Whole 1.05, whose port is [PR #662](https://github.com/seedds/nxnative/pull/662) (not yet in the games table). With the getters implemented it reached the title, menu, a save and character customization on the Mac; with them returning 0 it also progressed, but submitted commands at a different rate.
+
 ### Host-lent command memory segments
 
 - **Symptom:** `FATAL NVN command memory: the game's pool is empty…`.
 - **Cause:** our command records are larger than real NVN commands, so command buffers the game sizes for hardware overflow; when the game's out-of-memory callback declines to add memory, the host lends a segment. Many small command buffers each overflowing once per frame exhausted a fixed pool of 64 × 1 MB.
-- **Fix** (`hle_nvn.c`): the pool now grows on demand (256 KB segments, abort only beyond 1 GB; `hostseg_take`). A segment is released only when the game re-grants memory overlapping the guest bytes of the recording that jumped into it (`hostseg_release` in `AddCommandMemory`): the game records setup blocks once and keeps `CallCommands`-ing them for many frames, so recycling segments after a fixed number of frames would overwrite live recordings. An empty-pool grant of at most 4 KB outside a recording gets a 4 KB segment, a record larger than 256 KB gets a segment that holds it, and the cap counts every segment's bytes (`hostseg_size`).
-- **Found on:** [Super Mario Bros. Wonder](../../dm/games/010015100B514000/README.md) (the many small command buffers: its opening course, per the comment at `HOSTSEG_SZ` in `hle_nvn.c`), [Super Mario Odyssey](../../dm/games/0100000000010000/README.md) (it hands out many 512-byte grants before recording, and with no recording to reclaim them by, 256 KB each reached the cap entering the Wooded Kingdom: the 4 KB segments).
+- **Fix** (`hle_nvn.c`): the pool now grows on demand (256 KB segments, abort only beyond 1 GB; `hostseg_take`). A segment is released only when the game re-grants memory overlapping the guest bytes of the recording that jumped into it (`hostseg_release` in `AddCommandMemory`): the game records setup blocks once and keeps `CallCommands`-ing them for many frames, so recycling segments after a fixed number of frames would overwrite live recordings. An empty-pool grant of at most 4 KB outside a recording gets a 4 KB segment, a record larger than 256 KB gets a segment that holds it, and the cap counts every segment's bytes (`hostseg_size`). Such a grant has no guest range, so its segment is never reclaimed. On hardware a null pool cannot be written to, so a game that grants one has run out of the command memory it measured for itself: the host's records were larger than the driver's ([Model heaps sized by the host's command record sizes](memory.md#model-heaps-sized-by-the-hosts-command-record-sizes)). That is fixed in the record sizes; the host does not try to recycle these segments by guessing which recording a grant replaces.
+- **Found on:** [Super Mario Bros. Wonder](../../dm/games/010015100B514000/README.md) (the many small command buffers: its opening course, per the comment at `HOSTSEG_SZ` in `hle_nvn.c`), [Super Mario Odyssey](../../dm/games/0100000000010000/README.md) (it hands out many 512-byte grants before recording, and with no recording to reclaim them by, 256 KB each reached the cap entering the Wooded Kingdom: the 4 KB segments; 1.4.1 still reached it after 11 minutes of play, about 260,000 4 KB segments, because its display-list heap was full and each re-recording took a new one; fixed by the cause, [Model heaps sized by the host's command record sizes](memory.md#model-heaps-sized-by-the-hosts-command-record-sizes)).
 
 ### What `GetCommandMemoryUsed` counts
 
@@ -257,6 +272,14 @@ Games read this count as a position in their own command memory and size their h
 - **Fix:** hoist slice and row offsets, express power-of-two block dimensions as shifts/masks, and use the four fixed x offsets and eight fixed y offsets within a GOB. Full segments use constant-size 16-byte copies; byte counts not divisible by 16 retain a tail copy. ASTC blocks are always 16 bytes irrespective of their texel dimensions. Both copy directions preserve the layout, sparse row padding and mip/layer offsets.
 - **Found on:** [The Legend of Zelda: Breath of the Wild](../../dm/games/01007EF00011E000/README.md#found-on-this-game), reported in [PR #261](https://github.com/seedds/nxnative/pull/261).
 - **Check:** `t_tex` compares both directions against the byte-address formula for 1,029 deterministic layouts, including 1D/2D/3D, arrays/cubes, packaged block dimensions, sparse mip tails, 1/2/3/4/6/8/12/16-byte formats, padded pitches and partial segments. All 5,334 checks pass, including under AddressSanitizer and UBSan. A local arm64 Mac comparison against the old implementation, Apple clang 21 at the host's `-O1`, measured 7.4–7.7 GB/s before and 35.1–37.6 GB/s after (4.6–5.1x) across 1024x1024 sparse ASTC 6x6, 2048x2048 BC7, 1920x1080 RGBA8 and 1280x720 RGBA16F. Each result is the median of seven runs copying about 128 MiB, with implementation order alternated. This is a CPU microbenchmark; no new gameplay run here.
+
+### The Switch 2's order inside a GOB
+
+- **Symptom:** a Switch 2 game's textures from its files keep their shapes but break up along every edge: misplaced 4×4 blocks (16-byte pieces) in a regular weave, invisible in flat areas. Normal maps make lit surfaces look woven; opacity masks punch holes.
+- **Cause:** the GOB (64 bytes × 8 rows) keeps its size and place, but the Switch 2 orders its 16-byte pieces x5 y2 x4 y1 y0 from the GOB's start, where the Tegra X1 orders them x5 y2 y1 x4 y0: offset bits 5 and 6 exchanged, (x%64/32)·256 + (y%8/4)·128 + (x%32/16)·64 + (y%4/2)·32 + (y%2)·16 + x%16. Block heights, sizes and level offsets are unchanged (the BNTX headers' block heights and sizes match `nvn_tex_layout`).
+- **Fix:** `nvn_gob_switch2` (`dm/gfx/tex/nvn_deswizzle.h`), set at `nvnDeviceInitialize` when the SDK targets the Switch 2 (`dm_sdk_ounce`): the CPU address formula, the CPU copy tables and both Metal untiling kernels take the Switch 2's order.
+- **Check:** `t_tex` checks the Switch 2's offsets by hand (B2) and both orders where they differ; `t_deswz_gpu` runs every case in both orders, the GPU kernels against the CPU copy.
+- **Found on:** [Donkey Kong Bananza](../../dm/games/040074A01BF12000/README.md#rendering): level 0 of its BNTX textures (BC7 `BaseRock000_Pnrm`, BC4 `ArenaLevelShadowMaskSunbeam00_Smsk`) decoded with every order of the five address bits; the X1's left the weave, this order alone gave clean images (mean neighbour difference 19.5 → 14.9 on the rock normal map, 21.0 → 15.7 on the BC4 mask).
 
 ### Packaged texture block dimensions and linear storage rows
 
@@ -442,6 +465,14 @@ Games read this count as a position in their own command memory and size their h
 - **Found on:** [Tears of the Kingdom](../../dm/games/0100F2C0115B6000/README.md), reported in MacNativeGames commit `a166602` and ported through [PR #197](https://github.com/seedds/nxnative/pull/197). The missing-letter symptom has not been reproduced in nxnative; the tracker failures are reproduced locally by the regression tests.
 - **Check:** `t_dirty_race` covers the BUSY-page retry, stamp ordering, and a check between clock allocation and generation publication in both unprotect paths. The publication cases fail on main; the batched case also fails with the original PR applied.
 
+### A retired pool remains read-only
+
+- **Symptom:** a host system call writing into storage after its NVN pool was finalized fails with `EFAULT`; a direct write can fault after the tracker stopped owning the page.
+- **Cause:** `nvn_dirty_protect` found a live range without holding the slot mutex. Pool retirement could restore its pages to writable and mark the range dead before protect changed the page state to BUSY. Protect then set the retired storage read-only, with no live range left to release it. In the same window a new pool could reuse the slot, and protect would then compute its pages from the new pool's base and state array.
+- **Fix:** hold the pool-slot mutex across protect's lookup, page-state transitions and final `mprotect`. Pool creation and retirement already hold that mutex. The page-fault and host pre-write paths still take no slot mutex, so they can finish a BUSY transition while protect waits.
+- **Found on:** code review of the shared tracker, from a fork's compatibility commit `587d5206` ported through [PR #686](https://github.com/seedds/nxnative/pull/686). No game is known to hit it: a game normally finalizes a pool only after the GPU is done with it.
+- **Check:** `t_dirty_retire_race` retires the pool between protect's lookup and its first page-state exchange, then reads 16 bytes into the pool with `read()`. Without the fix, retirement completes first and the read fails with `EFAULT`; with it, retirement waits for protection, unregisters the pool and the read returns 16. `t_dirty_race` and `t_dirty_slots` cover page-state publication and shared / reused pool slots.
+
 ## NVN entry points
 
 ### Integer sampler border colours
@@ -480,6 +511,13 @@ Games read this count as a position in their own command memory and size their h
 - **Fix:** report the translator's supported GPU-code range, through 1.16, independently of the linked SDK. Precompiled shaders can come from a newer compiler: ASTRAL CHAIN links SDK 6.4 but ships 1.15 objects, defeating the earlier SDK-based floor. Keep the additional floor from a GLSLC the game carries (`hle_nvn.c`; that GLSLC check: [GLSLC GPU code version against the driver's range](shaders.md#glslc-gpu-code-version-against-the-drivers-range)). `t_nvn.c` checks the advertised range even without a loaded SDK.
 - **Note:** a wider range only lets more shaders pass such checks.
 - **Found on:** [Bayonetta 3](../../dm/games/01004A4010FEA000/README.md) (SDK 13.3.2, PlatinumGames' engine); [Catherine: Full Body](../../dm/games/0100BF00112C0000/README.md) (its GLSLC 8.2.1 set the earlier SDK 8 value); [Super Mario Odyssey](../../dm/games/0100000000010000/README.md) (the table's 1.14); [ASTRAL CHAIN](../../dm/games/01007300020FA000/README.md) (SDK 6.4, precompiled GPU code 1.15).
+
+### The Switch 2's device values
+
+- **Symptom:** none seen: a Switch 2 game asking `nvnDeviceGetInteger` got the Tegra X1's values (measured on a Switch 1), and items past 0x5F answered 0 with a red line.
+- **Cause:** NVN2 is compiled into the game's own `sdk`, and its answers differ: the procedure table's `DeviceGetInteger` calls a switch over the items (Donkey Kong Bananza's sdk 20.5.19: `sdk+0x5d9960`, items 0 to 0xA9, the default 231) that falls back on a table lookup (`sdk+0x5c0a20`). The item numbers are NVN's (API 231.30 at 0 / 1, GPU code 201.0 to 201.17 at 0x2E to 0x31, 201 = 0xc9, the version of its shaders' control sections). Ampere's differ from the X1's in 32 vertex bindings and attributes, 1,024 compute threads, an unbounded dispatch width, 16 texture levels, 16 KB scratch granularity, 2 KB shader code padding and 32 separate sampler bindings, and items 0x60 to 0xA9 are new. Seventeen items come from the device's own GPU description at run time (scratch scale factors, L2 size, texture layers and sizes, linear stride alignment, pool page size and others), which the binary cannot give.
+- **Fix:** `g_devinfo2` (`hle_nvn.c`), taken for an SDK with the Switch 2's spec (`dm_sdk_ounce`): NVN2's constants, read statically, except vertex bindings and attributes, which stay 16, all the host's tables hold. The run-time items keep the X1 table's value below 0x60 and answer 0 with a red line above it.
+- **Found on:** [Donkey Kong Bananza](../../dm/games/040074A01BF12000/README.md): plays as before with the new values (a 6,900-frame run at 60 fps, no red line).
 
 ### Extensions fetched by name and called unchecked
 

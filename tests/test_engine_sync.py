@@ -48,6 +48,32 @@ class EngineSyncTests(unittest.TestCase):
         self.assertEqual(inventory(self.target),before)
         verify_bundle(self.target)
 
+    def test_shared_face_helper_is_replaced_in_both_frontends(self):
+        for name in ('dm/host/front_mac.m', 'dm/ios/Sources/DmGamepad.m'):
+            path=self.source/name
+            path.write_text('#include "haptics_apple.h"\nuint64_t m = dm_pad_face(g);   // by position, a Nintendo pad by its labels\n')
+        self.commit()
+        sync(self.source,self.target)
+        for name in ('dm/host/front_mac.m', 'dm/ios/Sources/DmGamepad.m'):
+            text=(self.target/name).read_text()
+            self.assertIn('#include "controller_native.h"',text)
+            self.assertIn('uint64_t m = luma_face_buttons(g);',text)
+            self.assertNotIn('dm_pad_face(g)',text)
+        verify_bundle(self.target)
+
+    def test_ambiguous_or_missing_controller_anchors_preserve_snapshot(self):
+        sync(self.source,self.target);before=inventory(self.target)
+        original=self.front.read_text()
+        for text in (original.replace('#include "haptics_apple.h"',''),
+                     original+'uint64_t m = dm_pad_face(g);   // by position, a Nintendo pad by its labels\n',
+                     original.replace('   // by position: right A, bottom B, top X, left Y','')):
+            with self.subTest(text=text):
+                self.front.write_text(text);self.commit()
+                with self.assertRaisesRegex(RuntimeError,'controller interface changed'):
+                    sync(self.source,self.target)
+                self.assertEqual(inventory(self.target),before)
+                verify_bundle(self.target)
+
     def test_binary_fuzz_corpus_is_omitted_but_harness_is_preserved(self):
         corpus=self.source/'dm/tools/fuzz/corpus/nso'
         corpus.mkdir(parents=True)

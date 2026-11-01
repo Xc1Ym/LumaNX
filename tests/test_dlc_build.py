@@ -14,7 +14,7 @@ import build
 
 
 class DLCBuildTests(unittest.TestCase):
-    def pipeline(self, target, *, dlc=True, retry=False, base_extension='nsp'):
+    def pipeline(self, target, *, dlc=True, retry=False, base_extension='nsp', app_api=False):
         with tempfile.TemporaryDirectory(prefix="lumanx-dlc-中文's-") as directory:
             root=Path(directory)
             c=Context(dict(operation='exportIPA' if target=='ios' else 'build',
@@ -67,6 +67,11 @@ class DLCBuildTests(unittest.TestCase):
                 path.write_text('synthetic host');return path
 
             upstream=SimpleNamespace(extract=extract,extract_aoc=extract_aoc,rewrite=rewrite)
+            if app_api:
+                def extract_app(nx,keys,dst,version,base,update,extra,logs,profile,app):
+                    self.assertEqual(app,int(game['id'],16))
+                    extract(nx,keys,dst,version,base,update,extra,logs,profile)
+                upstream.extract=extract_app
             prepared=(work,repo,c.env(),upstream,gp,'fixture')
             with contextlib.redirect_stdout(io.StringIO()), \
                  patch('build.prepare',return_value=prepared), \
@@ -95,6 +100,8 @@ class DLCBuildTests(unittest.TestCase):
                 self.assertEqual(len(calls),2 if retry else int(dlc))
 
     def test_mac_dlc_arguments_install_and_cache(self): self.pipeline('macos')
+    def test_mac_extraction_receives_selected_application(self): self.pipeline('macos',app_api=True)
+    def test_ios_extraction_receives_selected_application(self): self.pipeline('ios',app_api=True)
     def test_ios_dlc_arguments_export_and_cache(self): self.pipeline('ios')
     def test_mac_without_dlc(self): self.pipeline('macos',dlc=False)
     def test_ios_without_dlc(self): self.pipeline('ios',dlc=False)
