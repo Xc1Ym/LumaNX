@@ -65,11 +65,58 @@ IPA 导出还需 Xcode 的 **iOS 平台**与 **XcodeGen**（`brew install xcodeg
 
 报错时，打开任务日志或复制脱敏错误摘要。[提交 Issue](https://github.com/Xc1Ym/LumaNX/issues) 请附应用、芯片、macOS、Xcode 版本及复现步骤。分享前检查诊断内容，排除游戏、密钥、固件、存档与私人缓存。
 
-## 开发与引擎更新
+## 引擎同步与版本发布
 
-启动器由 SwiftUI / AppKit 与 Python Worker 组成，固定版本的 nxnative 源码位于 `Engine/nxnative`。[开发说明](docs/开发说明.md) 包含依赖、自动化测试与打包流程。
+nxnative **每天同步一次上游**，通过 CI 验证后才更新到 `main`；如果上游变更未通过验证，则保留上一个已验证快照。
 
-每日上游同步工作流会先验证引擎更新，再发布到本仓库。Release 按需提供 DMG；如需在下次发布前使用较新的同步引擎，可从源码构建 App 或 DMG。
+**没有常规功能更新时，璃游每周发布一次版本**，汇总这段时间的 nxnative 更新；功能更新按其发布安排进行。每日同步引擎与每周发布 DMG 是两个独立步骤，已安装的应用使用其构建时内置的引擎。
+
+如果希望在下次发版前使用最新已成功同步的 nxnative，请按下面的步骤拉取当前 `main` 自行编译。使用新版引擎后，重新准备游戏以更新对应运行版本。
+
+## 从源码正确编译
+
+需要 **Apple Silicon Mac 与 macOS 26 或更新版本**，并在原生 `arm64` 终端中操作（用 `uname -m` 确认）。先安装 [Homebrew](https://brew.sh/) 和 **[.NET 10 SDK（macOS Arm64）](https://dotnet.microsoft.com/en-us/download/dotnet/10.0)**；打开完整 Xcode，自行接受许可并完成首次组件安装。Xcode 不在默认位置时，修改下面的 `DEVELOPER_DIR`。
+
+1. 获取最新已验证源码并准备工具链。`dotnet --list-sdks` 必须列出 `10.0.x` SDK，Metal 命令必须输出 Apple Metal 编译器版本。
+
+   ```bash
+   git clone --branch main https://github.com/Xc1Ym/LumaNX.git
+   cd LumaNX
+   export DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer
+   xcodebuild -version
+   xcodebuild -downloadComponent MetalToolchain
+   xcrun --sdk macosx metal --version
+   dotnet --list-sdks
+
+   brew install python@3.14 spirv-cross zstd xcodegen actionlint
+   mkdir -p work
+   "$(brew --prefix python@3.14)/bin/python3.14" -m venv work/python-venv
+   work/python-venv/bin/python -m pip install -r requirements-runtime.txt -r requirements-build.txt
+   ```
+
+2. 在仓库根目录执行启动器检查。
+
+   ```bash
+   actionlint .github/workflows/*.yml
+   work/python-venv/bin/python -B -m unittest discover -s tests -v
+   swift test --disable-sandbox --cache-path "$PWD/work/spm-cache" -c release
+   ```
+
+3. 按以下顺序构建。脚本依次收集固定版本的转换依赖、便携运行环境，编译元数据读取器，再编译并签名应用、生成 DMG。依赖收集和首次构建读取器时需要联网。
+
+   ```bash
+   swift scripts/make_icons.swift
+   work/python-venv/bin/python -B scripts/bundle_converter.py
+   work/python-venv/bin/python -B scripts/bundle_runtime.py
+   work/python-venv/bin/python -B scripts/bundle_engine.py
+   work/python-venv/bin/python -B scripts/package.py
+   work/python-venv/bin/python -B scripts/source_archive.py
+   work/python-venv/bin/python -B scripts/verify_release.py
+   ```
+
+产物为 `release/LumaNX.app`、`release/LumaNX-<version>-arm64.dmg`、源码 ZIP 和 `release/SHA256SUMS`，其中 `<version>` 取自 `product.json`。最后一条命令校验签名、DMG、源码内容、校验和及运行库搬移。再次构建前，请退出此输出目录中仍在运行的应用；打包采用 ad-hoc 签名，无需 Apple Developer 签名账号。
+
+以后更新时，在此 `main` 工作副本中执行 `git pull --ff-only`，再重复检查和构建步骤。内置引擎提交记录在 `Engine/nxnative/manifest.json`。原生引擎及 iOS 检查命令见 [CI 工作流](.github/workflows/ci.yml)和[开发说明](docs/开发说明.md)，其中 Metal/iOS 样例检查还需安装 Xcode 的 iOS 平台。编译启动器及其发行包不需要游戏或密钥。
 
 璃游原名 **LumaDock**。原有图标、应用标识、游戏库与设置继续兼容已有安装。
 

@@ -10,7 +10,7 @@ The source manifest records the upstream commit and file hashes. Old external-di
 
 Switch Pro A / Xbox A / PS cross automatically produce game A through GameController. Nintendo retains its printed A/B/X/Y layout; Xbox retains its letters; PS cross/circle/square/triangle produce A/B/X/Y. This does not require `DM_INPUT_CONFIG`; the optional mapping editor still requires that separate engine interface.
 
-nxnative is synchronized daily in the repository only after CI succeeds. Build your own App/DMG for the latest snapshot; Releases are provided on demand.
+nxnative is synchronized daily in the repository only after CI succeeds. When there are no regular feature updates, LumaNX releases once a week with the accumulated engine updates. For the latest synchronized snapshot before the next release, build your own App/DMG using the [README instructions](../README.md#build-from-source).
 
 ## Required tools
 
