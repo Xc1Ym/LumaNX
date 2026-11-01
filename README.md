@@ -65,11 +65,58 @@ Captured on **2026-10-30** from a **0.2.19 UI preview build**, in light appearan
 
 For a failure, open the task log or copy its redacted error summary. Include the app, chip, macOS and Xcode versions, plus reproduction steps, in your [issue](https://github.com/Xc1Ym/LumaNX/issues). Review diagnostics before sharing and exclude games, keys, firmware, saves and private caches.
 
-## Development and engine updates
+## Engine updates and releases
 
-The launcher uses SwiftUI / AppKit and a Python Worker. The pinned nxnative source lives in `Engine/nxnative`; the [development guide](docs/Development.md) covers dependencies, automated tests and packaging.
+nxnative is synchronized from upstream **once a day**, with updates committed to `main` only after CI passes. If an upstream change fails validation, the previous verified snapshot is retained.
 
-The daily upstream-sync workflow validates engine updates before publishing them to this repository. Releases provide a DMG on demand. To use a newer synchronized engine before the next release, build the App or DMG from source.
+**When there are no regular feature updates, LumaNX releases once a week** to include the accumulated nxnative updates. Feature updates follow their own release schedule. Daily engine synchronization and the weekly DMG release are separate: an installed app uses the engine bundled with that build.
+
+To use the latest successfully synchronized nxnative before the next release, build from the current `main` branch using the steps below. Re-prepare games to apply the new engine to their runtimes.
+
+## Build from source
+
+Use an **Apple Silicon Mac running macOS 26 or later**, with a native `arm64` terminal (`uname -m`). Install [Homebrew](https://brew.sh/) and the **[.NET 10 SDK for macOS Arm64](https://dotnet.microsoft.com/en-us/download/dotnet/10.0)**. Open the full Xcode app once, accept its license and finish initial component installation. Adjust `DEVELOPER_DIR` below if Xcode is installed elsewhere.
+
+1. Get the latest verified sources and prepare the toolchain. `dotnet --list-sdks` must show a `10.0.x` SDK, and the Metal command must report an Apple Metal compiler version.
+
+   ```bash
+   git clone --branch main https://github.com/Xc1Ym/LumaNX.git
+   cd LumaNX
+   export DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer
+   xcodebuild -version
+   xcodebuild -downloadComponent MetalToolchain
+   xcrun --sdk macosx metal --version
+   dotnet --list-sdks
+
+   brew install python@3.14 spirv-cross zstd xcodegen actionlint
+   mkdir -p work
+   "$(brew --prefix python@3.14)/bin/python3.14" -m venv work/python-venv
+   work/python-venv/bin/python -m pip install -r requirements-runtime.txt -r requirements-build.txt
+   ```
+
+2. Run the launcher checks from the repository root.
+
+   ```bash
+   actionlint .github/workflows/*.yml
+   work/python-venv/bin/python -B -m unittest discover -s tests -v
+   swift test --disable-sandbox --cache-path "$PWD/work/spm-cache" -c release
+   ```
+
+3. Build in this order. The scripts download pinned conversion dependencies, collect the portable runtime, compile the metadata reader, then build and sign the app and create the DMG. Internet access is required during dependency collection and the first reader build.
+
+   ```bash
+   swift scripts/make_icons.swift
+   work/python-venv/bin/python -B scripts/bundle_converter.py
+   work/python-venv/bin/python -B scripts/bundle_runtime.py
+   work/python-venv/bin/python -B scripts/bundle_engine.py
+   work/python-venv/bin/python -B scripts/package.py
+   work/python-venv/bin/python -B scripts/source_archive.py
+   work/python-venv/bin/python -B scripts/verify_release.py
+   ```
+
+The outputs are `release/LumaNX.app`, `release/LumaNX-<version>-arm64.dmg`, the source ZIP and `release/SHA256SUMS`; `<version>` comes from `product.json`. The last command verifies signatures, the DMG, source contents, checksums and runtime relocation. Close any running copy built into this output directory before rebuilding. Packaging uses ad-hoc signing and needs no Apple Developer signing account.
+
+For a later update, run `git pull --ff-only` in this `main` checkout and repeat the checks and build steps. The bundled engine revision is recorded in `Engine/nxnative/manifest.json`. For native-engine and iOS checks, see the [CI workflow](.github/workflows/ci.yml) and [development guide](docs/Development.md); the Metal/iOS fixture check also requires Xcode's iOS platform. Building the launcher and its distribution does not require games or keys.
 
 LumaNX was previously called **LumaDock**. The original icon, application identifier, library and settings remain compatible with existing installations.
 
