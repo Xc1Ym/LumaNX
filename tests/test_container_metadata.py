@@ -201,7 +201,8 @@ class ContainerSelectionTests(unittest.TestCase):
             spec=importlib.util.spec_from_file_location('lumanx_extraction_test',repo/'scripts/build_ipa_from_nsp.py')
             up=importlib.util.module_from_spec(spec);spec.loader.exec_module(up)
             up.PROG=up.Progress('off');up.run=build.container_runner(c,game)
-            up.extract(reader,root/'synthetic.keys',root/'extract','v0',source,None,None,logs,{'romfs_marker':'marker'})
+            up.extract(reader,root/'synthetic.keys',root/'extract','v0',source,None,None,logs,{'romfs_marker':'marker'},int(TITLE,16))
+            self.assertEqual(calls[0][calls[0].index('--app')+1],TITLE.lower())
             up.extract_aoc(reader,root/'synthetic.keys',repo,root,int(TITLE,16),{'dlc':[(int('0100000000011002',16),42,source)]},logs)
             self.assertTrue((root/'extract/v0/RomFS/marker').is_file())
             self.assertTrue((root/'aoc/2/dlc.txt').is_file())
@@ -228,6 +229,13 @@ class ContainerSelectionTests(unittest.TestCase):
                 self.assertIn(f'LumaNXSelected(ks, {source}, "{kind}")',code)
             engine.adapt_snapshot(root)
             self.assertEqual(path.read_text(),code)
+
+    def test_unknown_reader_filter_is_rejected(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root=make_engine(Path(temp)/'engine');path=root/'dm/tools/nx_extract/Program.cs'
+            path.write_text('static class P { static int Main(string[] a) { var b=OpenNsp(ks, a[1], ContentMetaType.Application, unknown); var u=OpenNsp(ks, a[2]); return 0; } void Aoc() { var p=OpenNsp(ks, nsp); } }')
+            with self.assertRaisesRegex(Failure,'NSP 读取器入口不兼容'):
+                engine.adapt_snapshot(root)
 
 
 if __name__=='__main__': unittest.main()

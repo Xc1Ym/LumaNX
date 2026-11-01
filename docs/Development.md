@@ -59,6 +59,8 @@ Daily upstream sync runs at 03:00 Asia/Shanghai (GitHub may delay schedules). `s
 
 The sync also guards the iOS 27 `deviceMotionBody` declaration at compile time so Xcode 26 can build the engine using the existing orientation fallback. SDK 27 builds retain the runtime availability check and the view-based motion frame. The guard is reapplied on every import; a changed patch interface fails before replacing the previous snapshot.
 
+The controller patch accepts the original inline mapping and the shared `dm_pad_face` call, requiring exactly one recognized mapping and include anchor in each frontend. The launcher passes the selected application ID to newer extraction stages and retains exact CNMT title/version selection in its metadata reader, including containers with multiple applications. Development engines with the older extraction signature remain supported.
+
 ## Product identity
 
 The Swift package, source target, executable and repository are named **LumaNX**. The original icon is unchanged. `org.nsmac.launcher`, `Application Support/NSMac` and `.nsmac-library.json` remain stable for existing installations and libraries. Historical copyright and third-party notices retain their original names.

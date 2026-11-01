@@ -22,7 +22,9 @@
 #   --game: the profile (DM_GAMES_DIR as for game.py) whose shader_pairs.tsv and pso_pairs.tsv are the pairs, and whose depth_mode key the depth mode, unless --pairs / --depth say;
 #   --gpu: architectures, with or without the applegpu_ prefix (default g18p); --depth: the game's NVN depth mode (gl = near -w, NVN's default; zero = near 0, which the game sets
 #   with nvnDeviceSetDepthMode: the host knows it only at run time, so the profile says it; a wrong one costs the device its own prebuild, as without the archive);
-#   --os-min: the archives' minimum OS (default: the SDK's major version, e.g. 27.0; a device on an older system cannot open them and builds the bases itself)
+#   --os-min: the archives' system (default: for iOS the SDK's major version, e.g. 27.0; for macOS the major version this Mac runs, since the Mac app is built for the Mac that builds it).
+#   A device opens only an archive of its own major version (macOS 27.2 refused archives made for 26.0 and 26.6 and opened those for 27.0 and 27.2), and builds the bases itself
+#   otherwise: the SDK's version on a Mac whose system is older than its Xcode's SDK (macOS 26.6 with Xcode 27.1) left that Mac without them (GitHub issue #673)
 import argparse, hashlib, json, os, shutil, struct, subprocess, sys, time
 from pathlib import Path
 
@@ -142,6 +144,15 @@ def library_digest(lib_dir, bases):
     return h.hexdigest()
 
 
+def space_needed(bases):   # what metal-tt is let start with, an estimate: its temporary files (TMPDIR, one .airp per base) and the archive (about 41 KB per base at 15,767 bases); Cruis'n Blast's 33,858 bases failed with 366 MB free
+    return max(2 << 30, bases * (96 << 10))
+
+
+def clear_temporaries(work):   # what a failed or killed metal-tt leaves in its TMPDIR (the work folder): translate-*, *.airp, multiple-functions-input-*.metallib
+    for f in [*work.glob('translate-*'), *work.glob('*.airp'), *work.glob('multiple-functions-input-*.metallib')]:
+        shutil.rmtree(f) if f.is_dir() else f.unlink(missing_ok=True)
+
+
 def sdk(platform):
     return 'iphoneos' if platform == 'ios' else 'macosx'
 
@@ -153,7 +164,8 @@ def tool_version(platform):
 
 
 def os_min_default(platform):
-    v = subprocess.run(['xcrun', '-sdk', sdk(platform), '--show-sdk-version'], capture_output=True, text=True, check=True).stdout.strip()
+    cmd = ['sw_vers', '-productVersion'] if platform == 'macos' else ['xcrun', '-sdk', sdk(platform), '--show-sdk-version']
+    v = subprocess.run(cmd, capture_output=True, text=True, check=True).stdout.strip()
     return v.split('.')[0] + '.0'
 
 
@@ -167,7 +179,7 @@ def main(argv=None):
     ap.add_argument('--gpu', default='g18p', help='GPU architectures, comma-separated (default g18p)')
     ap.add_argument('--depth', choices=('gl', 'zero'), help='the game\'s NVN depth mode (default: the profile\'s depth_mode, else gl: near = -w)')
     ap.add_argument('--platform', choices=('ios', 'macos'), default='ios')
-    ap.add_argument('--os-min', help='minimum OS of the archives (default: the SDK\'s major version)')
+    ap.add_argument('--os-min', help='minimum OS of the archives (default: iOS, the SDK\'s major version; macOS, this Mac\'s)')
     ap.add_argument('--script-only', action='store_true', help='write the script and the stamp, run no metal-tt')
     a = ap.parse_args(argv)
     if a.game:
@@ -209,11 +221,17 @@ def main(argv=None):
         kf.unlink(missing_ok=True); dst.unlink(missing_ok=True)
         part = work / f'{arch}.mtl4a.partial'; part.unlink(missing_ok=True)
         cmd = ['xcrun', '-sdk', sdk(a.platform), 'metal-tt', '-arch', arch, f'-{a.platform}-version-min', osmin, str(js), '-o', str(part)]
+        clear_temporaries(work)
+        need, free = space_needed(len(bases)), shutil.disk_usage(work).free
+        if free < need: sys.exit(f'[RED] pso_offline: {free / 2**30:.1f} GB free on the volume of {work}, metal-tt needs about {need / 2**30:.0f} GB for {len(bases)} bases: free some space and run again')
         t1 = time.time(); print(f'pso_offline: {arch}: metal-tt, {len(bases)} bases (minutes) ...', flush=True)
         with open(work / f'metal-tt.{arch}.log', 'w') as log:
             r = subprocess.run(cmd, stdout=log, stderr=subprocess.STDOUT, env=dict(os.environ, TMPDIR=str(work)))   # its temporary files on the work folder's volume
         if r.returncode or not part.is_file():
-            sys.exit(f'[RED] pso_offline: metal-tt failed for {arch} (exit {r.returncode}): {(work / f"metal-tt.{arch}.log").read_text()[-2000:]}')
+            free = shutil.disk_usage(work).free   # metal-tt says only "applegpu-nt command failed" when the volume fills up. Read before clearing: its temporaries are what filled it
+            clear_temporaries(work); part.unlink(missing_ok=True)
+            full = f' ({free / 2**30:.1f} GB free on the volume of {work} when it failed: likely out of disk space)' if free < 1 << 30 else ''
+            sys.exit(f'[RED] pso_offline: metal-tt failed for {arch} (exit {r.returncode}){full}: {(work / f"metal-tt.{arch}.log").read_text()[-2000:]}')
         os.replace(part, dst); kf.write_text(key + '\n')
         print(f'pso_offline: {arch}: {dst.stat().st_size / 2**20:.0f} MB in {time.time() - t1:.0f} s')
     for f in out.glob('*.mtl4a'):   # architectures no longer asked for

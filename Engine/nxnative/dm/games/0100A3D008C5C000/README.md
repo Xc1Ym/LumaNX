@@ -11,6 +11,8 @@ When the NSP folder also contains updates, build the supported version with
 `--platform mac` for a Mac build). The builder otherwise selects the newest
 supplied version. The supplied 4.0.0 update is damaged and remains unsupported
 (see [Files and builds](#files-and-builds)).
+[Pokémon Violet](../01008F6008C5E000/README.md) is its twin: the same `sdk`
+and `subsdk0` builds and the same shader tables, with a `main` of its own.
 
 ## Memory
 
@@ -35,12 +37,14 @@ supplied version. The supplied 4.0.0 update is damaged and remains unsupported
   The existing 62 MB node-area cuts apply because SDK build `3644a676…` is
   nirvanA Initiative's. Its allocation helper (`sdk+0x37c2d0`) rounds regions
   of at least 1 GB up to a 1 GB boundary, losing enough space to prevent the
-  4 GB reservation from fitting. The additional cut at `sdk+0x37c33c` uses
-  32 MB alignment, as for the equivalent SDK build in Sparks of Hope.
+  4 GB reservation from fitting. The additional cut at `sdk+0x37c33c` used
+  32 MB alignment, as for the equivalent SDK build in Sparks of Hope; the
+  SDK-wide rules now give it 2 MB, as below.
   Decompilation confirms region size and page guards are unchanged. The same
   startup check fails with only the main cut and reaches `nnMain` with both.
   Since Subnautica: Below Zero ([010014C011146000](../010014C011146000/README.md))
-  the build aligns its 4 MB, 32 MB and 1 GB classes to 2 MB, as SDK 20 does.
+  the build aligns its 4 MB, 32 MB and 1 GB classes to 2 MB, as SDK 20 does:
+  since 2026-10-30 from the SDK-wide alignment rule (the row was removed).
 - **Resolved: freed startup pages stayed mapped past the application pool.**
   Startup probes all allocatable memory, frees it, and leaves those pages in
   the SDK's cache. Without `mem_map_limit`, a physical-map census reaches

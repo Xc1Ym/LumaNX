@@ -2,6 +2,7 @@
 from __future__ import annotations
 import contextlib, importlib.util, json, os, re, shutil, subprocess, sys, time
 from pathlib import Path
+from inspect import signature
 from core import *
 from library import requirements, inspect
 import milestones as ms
@@ -264,10 +265,13 @@ def build(c,target='macos'):
         needed=sum(x['size'] for x in sources)*2+(10 if target=='ios' else 3)*2**30
         if shutil.disk_usage(c.library).free<needed and not st.saved: raise Failure(f'准备游戏需要约 {needed/2**30:.0f} GB 可用空间。')
         dirs={}
+        # Recent upstream requires the selected application for multi-app
+        # containers; older development engines keep the nine-argument API.
+        extraction={'app':int(g['id'],16)} if 'app' in signature(up.extract).parameters else {}
         for index,ver in enumerate(versions):
             upd=next((c.library/x['path'] for x in g['packages'] if x['type']=='update' and f"v{x['version']}"==ver),None)
             d=root/'extract'/ver; dirs[ver]=d
-            st.run('解包与合并 '+ver,[d],lambda ver=ver,upd=upd: up.extract(c.nx(),c.keys,root/'extract',ver,c.library/base['path'],upd,None,logs,gp),milestone=f'unpack-{index}')
+            st.run('解包与合并 '+ver,[d],lambda ver=ver,upd=upd: up.extract(c.nx(),c.keys,root/'extract',ver,c.library/base['path'],upd,None,logs,gp,**extraction),milestone=f'unpack-{index}')
         if own:
             import derived
             gp,sources_info=derived.prepare_profile(c,st,up,gp,root,repo,env,dirs[strategy['version']],strategy['version'])

@@ -22,6 +22,14 @@ static size_t g_reserve;           // its size: RESERVE, or more with a DM_ALIAS
 static uint8_t *g_heap; static _Atomic size_t g_heap_cur; static size_t g_heap_cap;
 // The address range lies entirely within the currently opened (readable and writable) part of the guest heap: such reads need no kernel trap to check, memcpy directly (used where guest memory is read every tick, such as diag.c tk_rd)
 int dm_guest_heap_readable(uint64_t a, size_t n) { uint64_t b = (uint64_t)(uintptr_t)g_heap; size_t cur = g_heap_cur; return g_heap && a >= b && n <= cur && a - b <= cur - n; }
+// The opened heap span for callers that address guest memory by region (hle_cheats.c region 1, like dmnt's heap extents): the
+// reservation's base (guest address) and the length the game has actually opened with SetHeapSize right now, which grows and
+// shrinks with it; both 0 until the game's first SetHeapSize. There is no lock: the caller uses the pair only to bounds-check and
+// restarts the check on each access, so a concurrent resize can at worst give it an answer about the span a moment ago
+void dm_guest_heap_range(uint64_t *base, size_t *open_len) {
+    if (base) *base = (uint64_t)(uintptr_t)g_heap;
+    if (open_len) *open_len = g_heap ? atomic_load(&g_heap_cur) : 0;
+}
 static uint8_t *g_alias; static size_t g_alias_cap;
 static _Atomic uint64_t *g_alias_bits;   // alias region page bitmap (alias_pages)
 static uint64_t *g_alias_exposed;   // one bit per host page ever opened; protected by g_map_lock
@@ -85,7 +93,9 @@ void svc_guest_range(uint8_t **base, size_t *size) { *base = g_as; *size = g_res
 enum { I_CoreMask=0, I_PriorityMask=1, I_AliasAddr=2, I_AliasSize=3, I_HeapAddr=4, I_HeapSize=5,
        I_TotalMem=6, I_UsedMem=7, I_DebuggerAttached=8, I_ResourceLimit=9, I_IdleTick=10, I_RandomEntropy=11,
        I_AslrAddr=12, I_AslrSize=13, I_StackAddr=14, I_StackSize=15, I_SysResTotal=16, I_SysResUsed=17,
-       I_ProgramId=18, I_InitProcIdRange=19, I_UserExcAddr=20, I_TotalNonSys=21, I_UsedNonSys=22, I_IsApplication=23, I_FreeThreadCount=24 };
+       I_ProgramId=18, I_InitProcIdRange=19, I_UserExcAddr=20, I_TotalNonSys=21, I_UsedNonSys=22, I_IsApplication=23, I_FreeThreadCount=24,
+       I_ThreadTickCount=25, I_IsSvcPermitted=26, I_IoRegionHint=27, I_AliasExtraSize=28,
+       I_RemoteAddr=29, I_RemoteSize=30, I_RemoteUsage0=31, I_RemoteUsage1=32, I_PageSize=33 };
 
 static uint8_t g_seen[256];
 
@@ -98,6 +108,24 @@ static uint8_t g_seen[256];
 static struct { uint64_t base, size, src; uint32_t state; } g_map[MAX_MAP];
 static int g_nmap;
 static pthread_mutex_t g_map_lock = PTHREAD_MUTEX_INITIALIZER;
+// A hole-free read / write of guest heap bytes for the cheat VM (hle_cheats.c): under g_map_lock no concurrent SetHeapSize
+// can mprotect the span away between the bounds check and the copy (both hold this same lock), so a live heap address cannot
+// turn into a fault while the cheat VM touches it. Both return 0 when every byte was inside the currently opened (readable
+// and writable) span, 1 otherwise. The address is the guest heap address the cheat VM computed (heap base + rel + offset register)
+int dm_guest_heap_write(uint64_t addr, const void *src, size_t len) {
+    pthread_mutex_lock(&g_map_lock);
+    int out = !dm_guest_heap_readable(addr, len);
+    if (!out) { dm_guest_write_prepare((void *)(uintptr_t)addr, len); memcpy((void *)(uintptr_t)addr, src, len); }
+    pthread_mutex_unlock(&g_map_lock);
+    return out;
+}
+int dm_guest_heap_read(uint64_t addr, void *out, size_t len) {
+    pthread_mutex_lock(&g_map_lock);
+    int bad = !dm_guest_heap_readable(addr, len);
+    if (!bad) memcpy(out, (void *)(uintptr_t)addr, len);
+    pthread_mutex_unlock(&g_map_lock);
+    return bad;
+}
 static int map_find(uint64_t a, uint64_t n) {       // returns a 1-based index, 0 = no overlap; caller holds g_map_lock
     for (int i = 0; i < g_nmap; i++) if (a < g_map[i].base + g_map[i].size && g_map[i].base < a + n) return i + 1;
     return 0;
@@ -328,24 +356,41 @@ static void region_free(uint64_t *r, int param) {
 // it instead (Absolum's .NET garbage collector takes 1.5 GB after it). The SDK lays the region out from that size, so it holds; the pool, not the region, bounds what the heap
 // can map. A workaround for the iPhone's address space, not the game: with room for the request (a Switch-sized DM_ALIAS_SIZE) nothing changes. Found by symbol in every sdk
 #define STDALLOC_LATER 0x10000000ull
-static void stdalloc_init(uint64_t *r, int param) {
-    (void)param;
-    if (r[1]) return;   // a heap over memory the game passes in: no address region
+// What the alias region has room for in one more region: past the end of the regions made so far, less STDALLOC_LATER for those made later, in 32 MB steps (0 = none)
+static uint64_t alias_room(void) {
     mem_init();
     uint64_t reach = 0x3e00000;   // the node area with the SDK-wide cut (sdk_patches.py); a build without it keeps 1 GB, and a 12 GB request fails there as before
     pthread_mutex_lock(&g_rgn_lock);
     for (int i = 0; i < g_nrgn; i++) if (g_rgn[i].off + g_rgn[i].size > reach) reach = g_rgn[i].off + g_rgn[i].size;
     pthread_mutex_unlock(&g_rgn_lock);
-    uint64_t cap = DM_GAME_STDALLOC_CAP ? DM_GAME_STDALLOC_CAP : g_alias_cap > reach + STDALLOC_LATER ? (g_alias_cap - reach - STDALLOC_LATER) & ~0x1ffffffull : 0;
+    return g_alias_cap > reach + STDALLOC_LATER ? (g_alias_cap - reach - STDALLOC_LATER) & ~0x1ffffffull : 0;
+}
+static void stdalloc_init(uint64_t *r, int param) {
+    (void)param;
+    if (r[1]) return;   // a heap over memory the game passes in: no address region
+    uint64_t cap = DM_GAME_STDALLOC_CAP ? DM_GAME_STDALLOC_CAP : alias_room();
     if (!cap || r[2] <= cap) return;
     char who[40]; uint64_t via; guest_caller(r, who, sizeof who, &via);
     LOG("[mem] StandardAllocator::Initialize(nullptr, %.2f GB) returning to %s: %.2f GB of address space, %s", r[2] / 1073741824.0, who, cap / 1073741824.0,
         DM_GAME_STDALLOC_CAP ? "the profile's stdalloc_cap" : "what the alias region has room for (the profile key stdalloc_cap sets it)");
     r[2] = cap;
 }
+// ---- Unreal's engine region ----
+// Unreal Engine 4 / 5's nninitStartup reserves one address region for the engine, which the engine hands out itself: 62 GB by default (16 GB in Unreal Engine 4.18), made for the
+// Switch's 64 GB alias region. The rewriter's gate on the store of its size right before the reservation (dm/tools/ue_region.py, in any Unreal main) gives it what the alias region
+// has room for, as StandardAllocator's gate above: the size variable (the register the gate number names) and the request (x1) both take it, so the engine lays the region out from
+// the size it got. -SwitchVirtualAddressSpaceSize= gives a size too, but UE 4.26 then skips the reservation (Pikmin 4); a smaller size given that way stays. A workaround for the
+// iPhone's address space, not the game: with room for the request (a Switch-sized DM_ALIAS_SIZE) nothing changes
+static void ue_region(uint64_t *r, int param) {
+    if (param < 1 || param > 28 || param == 18) return;
+    uint64_t cap = alias_room();
+    if (!cap || r[param] <= cap) return;
+    LOG("[mem] Unreal's engine region: %.2f GB asked, %.2f GB of address space, what the alias region has room for", r[param] / 1073741824.0, cap / 1073741824.0);
+    r[param] = r[1] = cap;
+}
 __attribute__((constructor)) static void regions_attach(void) {
     gate_obs_set(OBS_REGION_ASK, region_ask); gate_obs_set(OBS_REGION_GOT, region_got); gate_obs_set(OBS_REGION_FREE, region_free);
-    gate_obs_set(OBS_STDALLOC_INIT, stdalloc_init);
+    gate_obs_set(OBS_STDALLOC_INIT, stdalloc_init); gate_obs_set(OBS_UE_REGION, ue_region);
 }
 // Pages set in a bitmap's bits [lo, hi), a word at a time: a 62 GB region is 16 million pages, counted under g_map_lock, which every MapPhysicalMemory takes
 static uint64_t bits_set(_Atomic uint64_t *b, uint64_t lo, uint64_t hi) {
@@ -611,7 +656,7 @@ uint64_t svc_dispatch(int num, uint64_t *regs, uint64_t orig_addr) {
         if (regs[0] & 0x80000000ull) return 0;   // notification only, can continue
         _exit(42);
     }
-    case 0x1E: guest_clock_read_wait(); regs[0] = 0; regs[1] = guest_ns() * 12 / 625; return 0;   // GetSystemTick
+    case 0x1E: guest_clock_read_wait(); regs[0] = 0; regs[1] = guest_ticks(); return 0;   // GetSystemTick
     case 0x27: {  // OutputDebugString(str, len)
         if (g_flag.dbg) fprintf(stderr, "[guest] %.*s\n", (int)regs[1], (char *)regs[0]);
         regs[0] = 0; return 0;
@@ -643,7 +688,17 @@ uint64_t svc_dispatch(int num, uint64_t *regs, uint64_t orig_addr) {
         // left its main thread waiting at boot for a thread it never created (main+0x3e1ac4)
         case I_FreeThreadCount: { int thr_limit_used(void); int u = thr_limit_used(); v = u < 96 ? 96 - u : 0; break; }
         case I_UserExcAddr: { static _Alignas(0x1000) uint8_t ctx[0x1000]; v = (uint64_t)ctx; break; }   // user exception context area: newer SDKs' SetDyingMessageRegion writes to +0x1c0 (0 would write through a null pointer)
-        default: v = 0; break;
+        // The kernel's page size (Switch 2 SDKs): nn::ro::ProtectRelro takes it as the alignment of the RELRO bounds (value − 1 as a mask, 0 aborts), the VammManager maps that much up front.
+        // Horizon's pages are 4 KB, the alignment of every module's segments (Donkey Kong Bananza)
+        case I_PageSize: v = 0x1000; break;
+        // Horizon's other types (Atmosphère kern_svc_info.cpp), answered 0 as before they were named: no thread tick count, no SVC permission bits, no I/O region, and no extra alias
+        // region size (SDK 18 and later ask for it; only a process created with the extra-size flag has one)
+        case I_ThreadTickCount: case I_IsSvcPermitted: case I_IoRegionHint: case I_AliasExtraSize: v = 0; break;
+        // The Switch 2's remote region: nnosInitialize builds nn::os::detail::RemoteRegionManager's address space allocator over [type 29, type 29 + type 30), and
+        // nn::os::GetRemoteMemoryUsage returns types 31 and 32. The SDK's only user is the GPU driver's boot (nv::InitializeGraphics → nn::gs::sdk::BootGraphicsSystem →
+        // BootWithRemoteMemory), which the host's own nv::InitializeGraphics replaces (dm/gfx/hle_nv.c), so the process has no remote region and no remote memory (Donkey Kong Bananza)
+        case I_RemoteAddr: case I_RemoteSize: case I_RemoteUsage0: case I_RemoteUsage1: v = 0; break;
+        default: { static uint8_t seen[64]; if (id < 64 && !seen[id]) { seen[id] = 1; LOG("[RED] svc GetInfo: unknown info type %llu (answered 0)", (unsigned long long)id); } v = 0; break; }
         }
         regs[0] = 0; regs[1] = v; return 0;
     }

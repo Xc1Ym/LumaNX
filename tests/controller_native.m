@@ -18,6 +18,41 @@ void dm_gfx_suspend(int s) {(void)s;}
 void dm_haptics_apple_init(void) {}
 void dm_haptics_apple_controller(int p,GCController *c) {(void)p;(void)c;}
 void dm_haptics_apple_shutdown(void) {}
+// The front end now includes the cheats UI. This input-only harness never opens
+// it; fail if it reaches those services instead of loading any player state.
+// The engine's t_cheats suite exercises the real implementation separately.
+int dm_cheats_found(void) {abort();}
+int dm_cheats_ncheats(void) {abort();}
+const char *dm_cheats_build(void) {abort();}
+const char *dm_cheats_dir_path(void) {abort();}
+int dm_cheats_nothers(void) {abort();}
+const char *dm_cheats_other(int i) {(void)i;abort();}
+const char *dm_cheat_name_at(int i) {(void)i;abort();}
+const char *dm_cheat_why_at(int i) {(void)i;abort();}
+int dm_cheat_kind_at(int i) {(void)i;abort();}
+int dm_cheat_on_at(int i) {(void)i;abort();}
+void dm_cheat_toggle(int i) {(void)i;abort();}
+void dm_cheats_reload(void) {abort();}
+int dm_cheat_flags_at(int i) {(void)i;abort();}
+const char *dm_cheat_section_at(int i) {(void)i;abort();}
+const char *dm_cheat_note_at(int i) {(void)i;abort();}
+const char *dm_cheat_type_at(int i) {(void)i;abort();}
+int dm_cheat_preview(int i,char *out,size_t cap) {(void)i;(void)out;(void)cap;abort();}
+int dm_cheat_value_get(int i,char *out,size_t cap) {(void)i;(void)out;(void)cap;abort();}
+int dm_cheat_value_set(int i,const char *text) {(void)i;(void)text;abort();}
+const char *dm_cheat_value_bounds(int i) {(void)i;abort();}
+int dm_cheats_master(void) {abort();}
+void dm_cheats_master_set(int on) {(void)on;abort();}
+int dm_cheats_safe(void) {abort();}
+void dm_cheats_safe_restore(void) {abort();}
+const char *dm_cheats_report(void) {abort();}
+const char *dm_cheats_version(void) {abort();}
+const char *dm_cheats_other_version(int i) {(void)i;abort();}
+int dm_cheats_nskipped(void) {abort();}
+const char *dm_cheats_skipped_name(int i) {(void)i;abort();}
+const char *dm_cheats_skipped_why(int i) {(void)i;abort();}
+int dm_cheats_nsources(void) {abort();}
+const char *dm_cheats_source(int i) {(void)i;abort();}
 // The front end now publishes GameController and passive HID motion to the
 // service layer. Keep those sinks in the harness, like the pad/haptics sinks
 // above; the host's own tests cover sensor fusion and HID packet decoding.
