@@ -17,4 +17,16 @@ import XCTest
         pad.buttonA.setValue(1);pad.buttonX.setValue(1)
         XCTAssertEqual(ControllerMonitor.faceLabels(pad),["A","X"])
     }
+    func testHeldButtonAndRepeatedAxisEventsKeepOneLabel() {
+        let pad=GCController.withExtendedGamepad().extendedGamepad!
+        pad.buttonA.setValue(1)
+        for i in 0..<1000 {
+            pad.leftThumbstick.setValueForXAxis(Float(i%3)-1,yAxis:0)
+            let reading=ControllerMonitor.reading(pad)
+            XCTAssertEqual(reading.components(separatedBy:" · A").count-1,1)
+            XCTAssertLessThan(reading.count,180)
+        }
+        pad.buttonA.setValue(0)
+        XCTAssertFalse(ControllerMonitor.reading(pad).hasSuffix(" · A"))
+    }
 }

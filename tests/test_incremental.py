@@ -44,6 +44,10 @@ def rewrite(py,repo,exefs,out,env,logs,gp):
         (out/('main.'+ext)).write_text((exefs/'main').read_text())
 def split_shaders(py,repo,roms,mains,pkg,env,logs,gp,**kw):
     event(logs,'split');pkg.mkdir(parents=True);(pkg/'shader.bin').write_text('synthetic shader package')
+def capture_glslc(repo,dirs,version,patched,root,env,logs,gp):
+    event(logs,'capture');out=dirs[version]/'glslc_capture';out.mkdir();(out/'shader').write_text('captured')
+def decode_ue_shaders(repo,dirs,version,patched,root,env,logs,gp):
+    event(logs,'decode');out=dirs[version]/'ue_shaders';out.mkdir();(out/'shader').write_text('decoded')
 def build_mac_host(*a): pass
 '''
 
@@ -166,6 +170,16 @@ class IncrementalBuildTests(unittest.TestCase):
         self.build();(self.work/'stage-inputs.json').unlink()
         self.assertEqual(self.delta(lambda:(self.source/'dm/host/controller_native.h').write_text('controller revision 2')),['host'])
         self.assertEqual(self.compiler_invocations,1)
+
+    def test_capture_and_decode_do_not_depend_on_later_stage_outputs(self):
+        self.profile.write_text(self.profile.read_text().replace('graphics\tvulkan','graphics\tnvn')+'shader_glslc_capture\ton\n')
+        (self.profile.parent/'shader_map.tsv').write_text('vs_data.bin\t0\tvs\tkey\tsynthetic\n')
+        with patch('derived.detect_sources',return_value={'ue_decode':(True,'synthetic')}):
+            self.build()
+            self.assertEqual(self.events().count('capture'),1)
+            self.assertEqual(self.events().count('decode'),1)
+            self.assertEqual(self.delta(lambda:None),[])
+            self.assertEqual(self.delta(lambda:(self.source/'dm/host/controller_native.h').write_text('controller revision 2')),['host'])
 
     def test_shader_compiler_updates_shader_stage_and_matching_host(self):
         self.build()

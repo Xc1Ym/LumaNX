@@ -11,6 +11,10 @@ import GameController
         [(pad.buttonA.isPressed,"A"),(pad.buttonB.isPressed,"B"),
          (pad.buttonX.isPressed,"X"),(pad.buttonY.isPressed,"Y")].compactMap { $0.0 ? $0.1 : nil }
     }
+    static func reading(_ pad:GCExtendedGamepad) -> String {
+        let axes=String(format:L("左摇杆 %.2f, %.2f · 右摇杆 %.2f, %.2f · L2 %.2f · R2 %.2f"),pad.leftThumbstick.xAxis.value,pad.leftThumbstick.yAxis.value,pad.rightThumbstick.xAxis.value,pad.rightThumbstick.yAxis.value,pad.leftTrigger.value,pad.rightTrigger.value)
+        return ([axes]+faceLabels(pad)).joined(separator:" · ")
+    }
     init() {
         for n in [NSNotification.Name.GCControllerDidConnect, .GCControllerDidDisconnect] { observers.append(NotificationCenter.default.addObserver(forName:n,object:nil,queue:.main) { [weak self] _ in Task { @MainActor in self?.refresh() } }) }
         refresh()
@@ -21,8 +25,7 @@ import GameController
         name=c.vendorName ?? L("已连接手柄")
         pad.valueChangedHandler = { [weak self] p,_ in DispatchQueue.main.async {
             guard let self else {return}
-            self.value=String(format:L("左摇杆 %.2f, %.2f · 右摇杆 %.2f, %.2f · L2 %.2f · R2 %.2f"),p.leftThumbstick.xAxis.value,p.leftThumbstick.yAxis.value,p.rightThumbstick.xAxis.value,p.rightThumbstick.yAxis.value,p.leftTrigger.value,p.rightTrigger.value)
-            for label in Self.faceLabels(p) { self.value += " · "+label }
+            self.value=Self.reading(p)
         } }
     }
     deinit {for o in observers {NotificationCenter.default.removeObserver(o)}}

@@ -63,7 +63,7 @@ def requirements(g,p,derived_profiles=False):
                 if mod!='display' and x.get('builds',{}).get(mod)!=bid: missing.append(f'{ver} 的 {mod} 构建标识与已适配版本不同')
     return missing
 
-def import_games(c):
+def scan_sources(c):
     import conversion, dump
     files=[];dumps=[];c.begin('扫描游戏文件',1,1)
     for s in c.r['paths']:
@@ -80,10 +80,21 @@ def import_games(c):
         else: raise Failure('请选择 NSP、XCI、NSZ、XCZ 文件或包含这些文件的文件夹。')
     files=list(dict.fromkeys(files))
     if not files and not dumps: raise Failure('所选位置没有支持的游戏文件。')
+    return files,list(dict.fromkeys(dumps))
+
+
+def scan_import(c):
+    files,dumps=scan_sources(c)
+    return {'requiresKeys':bool(files),'containers':len(files),'dumps':len(dumps)}
+
+
+def import_games(c):
+    import conversion, dump
+    files,dumps=scan_sources(c)
     if files:
         if not c.keys.exists(): raise Failure('请先导入玩家自己的 prod.keys。')
         validate_keys(c.keys)
-    results=[dump.import_game(c,folder) for folder in dict.fromkeys(dumps)]
+    results=[dump.import_game(c,folder) for folder in dumps]
     if files:
         with conversion.import_packages(c,files) as packages:
             results.extend(import_containers(c,packages)['imports'])

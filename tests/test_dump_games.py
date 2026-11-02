@@ -103,6 +103,25 @@ class DumpGameTests(unittest.TestCase):
         self.c.r['paths']=[str(parent)];self.imported()
         self.assertEqual(self.game()['id'],TITLE)
 
+    def test_scan_preflight_uses_recursive_import_classifier(self):
+        parent=self.root/'scan';parent.mkdir();self.source.rename(parent/'game')
+        self.c.r['paths']=[str(parent)]
+        self.assertEqual(self.quiet(library.scan_import,self.c),dict(requiresKeys=False,containers=0,dumps=1))
+        self.assertEqual(self.c.catalog()['games'],[])
+        (parent/'ordinary.nsp').write_text('synthetic')
+        self.assertEqual(self.quiet(library.scan_import,self.c),dict(requiresKeys=True,containers=1,dumps=1))
+
+    def test_incomplete_dump_shape_does_not_prune_nested_containers(self):
+        folder=self.root/'ordinary';(folder/'base/exefs').mkdir(parents=True)
+        package=folder/'base/exefs/game.nsp';package.write_text('synthetic')
+        self.c.r['paths']=[str(folder)]
+        self.assertFalse(dump.is_dump(folder))
+        files,dumps=self.quiet(library.scan_sources,self.c)
+        self.assertEqual(files,[package.resolve()]);self.assertEqual(dumps,[])
+        (folder/'base/exefs/main.npdm').mkdir()
+        (folder/'base/romfs').mkdir()
+        self.assertFalse(dump.is_dump(folder))
+
     def test_missing_registered_update_is_reported_without_deriving(self):
         import shutil
         shutil.rmtree(self.source/'updates')

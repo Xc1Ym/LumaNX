@@ -20,6 +20,11 @@ with (root/'operations.jsonl').open('a') as f:
     f.write(json.dumps({'operation':r['operation'],'gameId':r.get('gameId'),'paths':r.get('paths'),'confirmed':r.get('confirmed'),'engineDir':r.get('engineDir'),'gameLanguage':r.get('gameLanguage'),'outputPath':r.get('outputPath')})+'\n')
 if r['operation']=='catalog':
     result=json.loads((root/'catalog.json').read_text())
+elif r['operation']=='scanImport':
+    sys.path.insert(0, \#(String(reflecting: URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent().appendingPathComponent("Worker").path)))
+    import library
+    from types import SimpleNamespace
+    result=library.scan_import(SimpleNamespace(r=r,begin=lambda *a:None,check=lambda:None))
 elif r['operation']=='import':
     result={'imports':json.loads((root/'imports.json').read_text())}
 elif r['operation']=='preflight':
@@ -83,6 +88,7 @@ print(json.dumps({'schema':1,'taskId':r['taskId'],'type':'result','state':'compl
         let folder=root.appendingPathComponent("Switch 2 中文目录")
         try FileManager.default.createDirectory(at:folder.appendingPathComponent("base/exefs"),withIntermediateDirectories:true)
         try Data("transport fixture".utf8).write(to:folder.appendingPathComponent("base/exefs/main.npdm"))
+        try FileManager.default.createDirectory(at:folder.appendingPathComponent("base/romfs"),withIntermediateDirectories:true)
         var entry=game("0400000000010000");entry["sourceKind"]="dump"
         try configure(root,games:[entry],imports:[["id":"0400000000010000","duplicate":false]])
         store.addGames([folder])
@@ -93,6 +99,35 @@ print(json.dumps({'schema':1,'taskId':r['taskId'],'type':'result','state':'compl
         store.generateIPA(dumped,destination:root.appendingPathComponent("blocked.ipa"))
         XCTAssertNotNil(store.error)
         XCTAssertFalse(operations(root).contains{$0["operation"] as? String == "exportIPA"})
+        await cleanup(root,store)
+    }
+    func testParentFolderOfDumpsImportsWithoutKeys() async throws {
+        let (root,store)=try fixture();store.prepareAfterImport=false;store.showOnboarding=false
+        try FileManager.default.removeItem(at:store.privateRoot.appendingPathComponent("keys/prod.keys"))
+        let parent=root.appendingPathComponent("待扫描目录")
+        let dump=parent.appendingPathComponent("game")
+        try FileManager.default.createDirectory(at:dump.appendingPathComponent("base/exefs"),withIntermediateDirectories:true)
+        try FileManager.default.createDirectory(at:dump.appendingPathComponent("base/romfs"),withIntermediateDirectories:true)
+        try Data("synthetic".utf8).write(to:dump.appendingPathComponent("base/exefs/main.npdm"))
+        try configure(root,games:[game("g1")],imports:[["id":"g1","duplicate":false]])
+        store.addGames([parent])
+        try await waitUntil {store.games.count==1 && store.processes.isEmpty}
+        XCTAssertFalse(store.showOnboarding)
+        let ops=operations(root).compactMap{$0["operation"] as? String}
+        XCTAssertTrue(ops.contains("scanImport"));XCTAssertTrue(ops.contains("import"))
+        await cleanup(root,store)
+    }
+    func testContainerInsideFolderStillRequiresKeys() async throws {
+        let (root,store)=try fixture();store.showOnboarding=false
+        try FileManager.default.removeItem(at:store.privateRoot.appendingPathComponent("keys/prod.keys"))
+        let folder=root.appendingPathComponent("待扫描目录")
+        try FileManager.default.createDirectory(at:folder,withIntermediateDirectories:true)
+        try Data("synthetic".utf8).write(to:folder.appendingPathComponent("game.nsp"))
+        store.addGames([folder])
+        try await waitUntil {store.showOnboarding && store.processes.isEmpty}
+        XCTAssertEqual(store.onboardingStep,2)
+        XCTAssertTrue(operations(root).contains{$0["operation"] as? String == "scanImport"})
+        XCTAssertFalse(operations(root).contains{$0["operation"] as? String == "import"})
         await cleanup(root,store)
     }
     func testIPARetryKeepsExportOperationAndDestination() async throws {

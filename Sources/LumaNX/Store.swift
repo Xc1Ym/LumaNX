@@ -339,12 +339,21 @@ final class WorkerOutput: @unchecked Sendable {
     }
     func addGames(_ urls: [URL]) {
         guard !urls.isEmpty else { return }
-        let dumps = urls.allSatisfy { url in
-            FileManager.default.fileExists(atPath:url.appendingPathComponent("base/exefs/main.npdm").path)
-        }
-        guard importPrerequisitesReady(requiresKeys:!dumps) else { return }
+        let folders = urls.allSatisfy { (try? $0.resourceValues(forKeys:[.isDirectoryKey]).isDirectory) == true }
+        guard importPrerequisitesReady(requiresKeys:!folders) else { return }
         let libraryId = preferences.libraryId
         let prepare = prepareAfterImport
+        if folders {
+            // The worker shares this recursive classifier with actual import.
+            // Keep potentially large directory scans off the main actor.
+            worker("scanImport",extra:["paths":urls.map(\.path)],visible:false) { result in
+                guard libraryId == self.preferences.libraryId,
+                      self.importPrerequisitesReady(requiresKeys:result["requiresKeys"] as? Bool ?? true) else {return}
+                self.importGames(urls,libraryId:libraryId,prepare:prepare)
+            }
+        } else { importGames(urls,libraryId:libraryId,prepare:prepare) }
+    }
+    private func importGames(_ urls:[URL],libraryId:String,prepare:Bool) {
         selection = "tasks"
         worker("import",extra:["paths":urls.map(\.path)]) { result in
             guard libraryId == self.preferences.libraryId else { return }

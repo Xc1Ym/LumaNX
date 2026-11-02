@@ -11,7 +11,8 @@ from core import Failure, clone, contained, digest, profiles
 
 
 def is_dump(path):
-    return (Path(path)/'base/exefs').is_dir()
+    path=Path(path)
+    return (path/'base/exefs/main.npdm').is_file() and (path/'base/romfs').is_dir()
 
 
 def tree_entries(c, root):

@@ -143,7 +143,7 @@ def package(c, root, repo, env, gp, selected, patched, shaders, aoc, up=None):
         compile_application(c,root,repo,env,gp,selected,patched,shaders,aoc,up)
     ms.enter(c,'ipa_check','验证 IPA 完整性')
     validate(built, c)
-    if key: atomic(record,dict(key=key,size=built.stat().st_size,sha256=digest(built,c.progress)))
+    if key and not reused: atomic(record,dict(key=key,size=built.stat().st_size,sha256=digest(built,c.progress)))
     ms.enter(c,'ipa_export','导出 IPA')
     # Copy to the destination volume before the atomic replace; cancellation keeps
     # any previous export, Mac release and saves intact.

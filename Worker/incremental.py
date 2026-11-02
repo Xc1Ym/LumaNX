@@ -228,7 +228,11 @@ class Graph:
             base.update(inputs=self.artifacts(saved,{'unpack'},files=lambda p:'/ExeFS/' in p or Path(p).suffix.lower() in ('.nro','.nrr')),
                 tools=self.group_keys['rewrite'],profile=self.profile_rows(kind),tables=self.profile_keys['rewrite'])
         elif kind in ('capture','decode','split'):
-            base.update(inputs=self.artifacts(saved,{'unpack','rewrite','capture','decode'}-({kind} if kind!='capture' else {'capture'})),
+            # Capture and decoder producers read source/rewrite artifacts, not
+            # their own previous outputs or results of later stages. Only the
+            # split consumes completed capture/decoder outputs.
+            parents={'unpack','rewrite','capture','decode'} if kind=='split' else {'unpack','rewrite'}
+            base.update(inputs=self.artifacts(saved,parents),
                 tools=self.group_keys['shader'],profile=self.profile_rows(kind),tables=self.profile_keys['shader'])
             if kind in ('capture','decode'):
                 base.update(host=self.group_keys['execution'],clang=t.get('clang'),metal=t.get('metal'),sdk=t.get('macos-sdk'),sdkBuild=t.get('macos-sdk-build'))

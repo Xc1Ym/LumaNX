@@ -120,7 +120,9 @@ class IPATests(unittest.TestCase):
         with patch.object(self.c,'run',side_effect=lambda args,*a,**kw:archive(Path(args[-1]))) as run:
             first=self.package()
             self.c.r['outputPath']=str(self.root/'another.ipa')
-            second=self.package()
+            with patch('ipa.digest',wraps=digest) as hashes:
+                second=self.package()
+            self.assertEqual(sum(Path(call.args[0])==self.work/'ipa/game.ipa' for call in hashes.call_args_list),1)
         self.assertEqual(run.call_count,1)
         self.assertEqual(first['sha256'],second['sha256'])
         self.assertTrue((self.root/'another.ipa').is_file())

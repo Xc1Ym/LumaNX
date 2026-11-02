@@ -33,7 +33,7 @@ def main():
     def heartbeat():
         while not heartbeat_stop.wait(1): c.emit('heartbeat')
     threading.Thread(target=heartbeat,daemon=True).start()
-    ops={'prepareEngine':engine.prepare,'installMetal':toolchain.install_metal,'uninstallMetal':toolchain.uninstall_metal,'setup':library.setup,'preflight':library.preflight,'keys':library.keys,'import':library.import_games,'catalog':library.catalog,'remove':library.remove,'clean':library.clean,'diagnostics':library.diagnostics,'build':build.build,'migrate':build.migrate,'launch':build.launch,'saveInput':input_config.save,'defaultInput':lambda c:input_config.defaults()}
+    ops={'prepareEngine':engine.prepare,'installMetal':toolchain.install_metal,'uninstallMetal':toolchain.uninstall_metal,'setup':library.setup,'preflight':library.preflight,'keys':library.keys,'scanImport':library.scan_import,'import':library.import_games,'catalog':library.catalog,'remove':library.remove,'clean':library.clean,'diagnostics':library.diagnostics,'build':build.build,'migrate':build.migrate,'launch':build.launch,'saveInput':input_config.save,'defaultInput':lambda c:input_config.defaults()}
     try:
         ops['exportIPA'] = ipa.export
         ops.update(backupSave=recovery.backup,restoreSave=recovery.restore,listRecovery=recovery.list_recovery,activateRelease=recovery.activate)
