@@ -61,6 +61,10 @@ The sync also guards the iOS 27 `deviceMotionBody` declaration at compile time s
 
 The controller patch accepts the original inline mapping and the shared `dm_pad_face` call, requiring exactly one recognized mapping and include anchor in each frontend. The launcher passes the selected application ID to newer extraction stages and retains exact CNMT title/version selection in its metadata reader, including containers with multiple applications. Development engines with the older extraction signature remain supported.
 
+## Incremental preparation
+
+`Worker/incremental.py` defines per-stage source, profile, toolchain and artifact dependencies. `Stages` records input keys plus verified output hashes and directory layouts; `prepare` keeps a writable workspace per game and target while refreshing only its private engine snapshot. Installed runtimes remain independent verified releases. `tests/test_incremental.py` exercises the production coordinator with synthetic producers and verifies which stages actually execute, including controller-only updates and legacy-cache provenance. Command-coordinator edits and unknown dependencies conservatively invalidate stages. See [the dependency and migration guide](增量构建.md) (Chinese).
+
 ## Product identity
 
 The Swift package, source target, executable and repository are named **LumaNX**. The original icon is unchanged. `org.nsmac.launcher`, `Application Support/NSMac` and `.nsmac-library.json` remain stable for existing installations and libraries. Historical copyright and third-party notices retain their original names.

@@ -3426,5 +3426,93 @@
   {
     "source": "无法删除任务记录。",
     "en": "Could not delete the task record."
+  },
+  {
+    "source": "解包目录无效或包含符号链接。",
+    "en": "The dump folder is invalid or contains symbolic links."
+  },
+  {
+    "source": "解包目录的 main.npdm 无效。",
+    "en": "The dump folder has an invalid main.npdm."
+  },
+  {
+    "source": "解包目录缺少 base/exefs/main.npdm。",
+    "en": "The dump folder is missing base/exefs/main.npdm."
+  },
+  {
+    "source": "解包目录的程序标识不是游戏本体。",
+    "en": "The dump program ID is not a base game ID."
+  },
+  {
+    "source": "已解包游戏需要 nxnative 已适配的游戏配置。",
+    "en": "Decrypted game folders require a registered nxnative game profile."
+  },
+  {
+    "source": "更新目录名必须是唯一的十进制版本号。",
+    "en": "Update folders must have unique decimal version numbers."
+  },
+  {
+    "source": "解包目录缺少 exefs/main 或完整 romfs。",
+    "en": "The dump folder is missing exefs/main or a complete romfs."
+  },
+  {
+    "source": "更新与本体的程序标识不一致。",
+    "en": "The update and base game have different program IDs."
+  },
+  {
+    "source": "解包目录缺少有效的 NSO 代码模块。",
+    "en": "The dump folder is missing valid NSO code modules."
+  },
+  {
+    "source": "DLC 目录名必须是该游戏的十六进制 Title ID。",
+    "en": "DLC folders must use a hexadecimal Title ID belonging to this game."
+  },
+  {
+    "source": "DLC 必须包含一个完整 romfs 目录。",
+    "en": "Each DLC must contain one complete romfs folder."
+  },
+  {
+    "source": "校验已解包游戏目录",
+    "en": "Validate decrypted game folder"
+  },
+  {
+    "source": "同一游戏不能混用游戏包和解包目录，请先清理托管源文件。",
+    "en": "A game cannot mix packages and decrypted folders. Clean its managed source copies first."
+  },
+  {
+    "source": "复制已解包游戏到游戏库",
+    "en": "Copy decrypted game to library"
+  },
+  {
+    "source": "已解包游戏目前仅支持 Mac 运行，尚未开放 IPA 导出。",
+    "en": "Decrypted game folders currently support Mac only. IPA export is not available yet."
+  },
+  {
+    "source": "添加游戏包或 Switch 2 已解包目录（⌘O）；已解包目录无需密钥。",
+    "en": "Add game packages or a decrypted Switch 2 folder (⌘O). Decrypted folders need no keys."
+  },
+  {
+    "source": "添加游戏包或 Switch 2 已解包目录。\n游戏包需要 prod.keys；已解包目录无需密钥。",
+    "en": "Add game packages or a decrypted Switch 2 folder.\nPackages require prod.keys; decrypted folders need no keys."
+  },
+  {
+    "source": "已解包游戏 · 仅 Mac · 实验性",
+    "en": "Decrypted game · Mac only · Experimental"
+  },
+  {
+    "source": "游戏包需要 prod.keys；Switch 2 已解包目录可跳过此步，无需密钥。",
+    "en": "Game packages require prod.keys. Decrypted Switch 2 folders need no keys, so you can skip this step."
+  },
+  {
+    "source": "仅添加已解包游戏，跳过密钥",
+    "en": "Skip keys and add decrypted games only"
+  },
+  {
+    "source": "可以添加游戏",
+    "en": "Ready to add games"
+  },
+  {
+    "source": "选择游戏包，或包含 base/exefs 与 base/romfs 的已解包根目录。更新需要合并后的完整 RomFS；导入后校验版本并准备 Mac 运行文件。",
+    "en": "Select game packages or a decrypted root folder containing base/exefs and base/romfs. Updates need complete patched RomFS trees. Imported games are checked before preparing Mac runtime files."
   }
 ]

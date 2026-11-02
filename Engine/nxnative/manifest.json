@@ -1,5 +1,5 @@
 {
-  "controllerPatch": "69ee27d19160faafc2704d8cfceaab140e6ae47e9fb062072193aeef0e63c863",
+  "controllerPatch": "5a104c9899119c3fc7a65f64ad21033bf58fd2e4ab9965785c99ec511aa8be40",
   "files": {
     "LICENSE": "a65554a74de59bf4d2210f3d4381c67d6fc6fa78f237f83c85543773319efa7b",
     "README.md": "18700f9bbf830fe14566401887c4f5bf8f09aab146488023b67a915b9dca58bf",
@@ -1426,7 +1426,7 @@
     "dm/gfx/vk/hle_vk.m": "aee151601a08cb1074726c8cab3d500657d64d769f4a59ae9df52c77ce3b04ca",
     "dm/host/.gitignore": "23fc1eea830f0f692a46eca2610922dc737e9a90281ba776dd825c7f4364a875",
     "dm/host/Makefile": "5d863193e6eae7a5059da53184117b237b1e74e5e88ac8132c54e3d74ece7ac1",
-    "dm/host/controller_native.h": "69ee27d19160faafc2704d8cfceaab140e6ae47e9fb062072193aeef0e63c863",
+    "dm/host/controller_native.h": "5a104c9899119c3fc7a65f64ad21033bf58fd2e4ab9965785c99ec511aa8be40",
     "dm/host/crash.c": "ada08ff3418de674480c8a1a688c571a8ad1afeba62d4dfce5c101fee485b9d9",
     "dm/host/dm.h": "719aead3fb6e14a3eb8dcd5a263e17e1c64849d82b73d301d96092115b762921",
     "dm/host/dm_input.h": "fc4d2f83a46b7ac898856605b769e53aea43c4813630c8f12d462024606f6d2d",

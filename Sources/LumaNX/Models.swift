@@ -12,6 +12,8 @@ struct Game: Codable, Identifiable {
     var id: String; var name: String; var display: String; var packages: [NSPPackage]; var hidden: Bool
     var compatibility: String?; var missing: [String]?; var cover: String?; var ready: Bool?; var needsPreparation: Bool?; var inputConfig:Bool?; var preparationMode:String?; var preparationVersion:String?
     var runtimeVersion: String?
+    var sourceKind: String?
+    var canExportIPA: Bool { sourceKind != "dump" }
     var compatibilityName: String { ["startup":L("仅验证启动"),"verified":L("Mac 已验证"),"experimental":L("实验性"),"unsupported":L("暂不支持")][compatibility ?? "unsupported"] ?? L("实验性") }
     var buildable: Bool { compatibility != "unsupported" && (missing ?? []).isEmpty }
 }

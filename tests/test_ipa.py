@@ -115,6 +115,26 @@ class IPATests(unittest.TestCase):
         self.assertEqual(Path(json.loads(self.c.jobpath.read_text())['outputPath']).resolve(),output)
         self.assertFalse(list(self.root.glob('*.partial')))
 
+    def test_incremental_export_reuses_valid_archive_for_a_new_destination(self):
+        atomic(self.work/'identity.json',{'pipeline':'synthetic','target':'ios','sources':['synthetic']})
+        with patch.object(self.c,'run',side_effect=lambda args,*a,**kw:archive(Path(args[-1]))) as run:
+            first=self.package()
+            self.c.r['outputPath']=str(self.root/'another.ipa')
+            with patch('ipa.digest',wraps=digest) as hashes:
+                second=self.package()
+            self.assertEqual(sum(Path(call.args[0])==self.work/'ipa/game.ipa' for call in hashes.call_args_list),1)
+        self.assertEqual(run.call_count,1)
+        self.assertEqual(first['sha256'],second['sha256'])
+        self.assertTrue((self.root/'another.ipa').is_file())
+
+    def test_incremental_export_rebuilds_changed_inputs_and_corrupt_cached_archive(self):
+        atomic(self.work/'identity.json',{'pipeline':'synthetic','target':'ios','sources':['synthetic']})
+        with patch.object(self.c,'run',side_effect=lambda args,*a,**kw:archive(Path(args[-1]))) as run:
+            self.package();(self.work/'ipa/game.ipa').write_bytes(b'tampered')
+            self.package();self.assertEqual(run.call_count,2)
+            atomic(self.work/'identity.json',{'pipeline':'new','target':'ios','sources':['synthetic']})
+            self.package();self.assertEqual(run.call_count,3)
+
     def test_failure_and_cancellation_preserve_previous_export_and_mac_runtime(self):
         output=ipa.destination(self.c);output.write_text('previous IPA')
         runtime=self.c.library/'games'/self.g['id']/'current';runtime.mkdir(parents=True)
