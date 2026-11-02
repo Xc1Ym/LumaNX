@@ -32,7 +32,7 @@ def keys(c):
     candidate=c.keys.with_suffix('.candidate'); candidate.write_bytes(src.read_bytes()); os.chmod(candidate,0o600)
     verified=False
     try:
-        packages=[p for g in c.catalog()['games'] for p in g['packages']]
+        packages=[p for g in c.catalog()['games'] for p in g['packages'] if p.get('sourceKind')!='dump']
         if packages:
             inspect(c,c.library/packages[0]['path'],candidate); verified=True
         os.replace(candidate,c.keys); os.chmod(c.keys,0o600)
@@ -51,6 +51,7 @@ def inspect(c,path,key=None,icon=None):
 
 def requirements(g,p,derived_profiles=False):
     if not p: return ['此游戏尚无原生适配配置']
+    if g.get('sourceKind')=='dump': derived_profiles=False
     if derived_profiles and any(x['type']=='base' and x['version']==0 for x in g['packages']): return []
     packages=g['packages']; need=['v0']+list(dict.fromkeys([p['package']]+p.get('shader_versions',p['package']).split()))
     have={f"v{x['version']}" for x in packages if x['type'] in ('base','update')}
@@ -63,20 +64,30 @@ def requirements(g,p,derived_profiles=False):
     return missing
 
 def import_games(c):
-    import conversion
-    if not c.keys.exists(): raise Failure('请先导入玩家自己的 prod.keys。')
-    validate_keys(c.keys); files=[];c.begin('扫描游戏文件',1,1)
+    import conversion, dump
+    files=[];dumps=[];c.begin('扫描游戏文件',1,1)
     for s in c.r['paths']:
         p=Path(s).expanduser()
         if p.is_symlink(): raise Failure('不接受指向游戏库之外的符号链接。')
         p=p.resolve()
-        if p.is_dir(): files.extend(x for x in sorted(p.rglob('*')) if x.suffix.lower()[1:] in conversion.FORMATS and x.is_file() and not x.is_symlink())
+        if p.is_dir():
+            for parent,dirs,names in os.walk(p,followlinks=False):
+                c.check();folder=Path(parent)
+                dirs[:]=sorted(d for d in dirs if not (folder/d).is_symlink())
+                if dump.is_dump(folder): dumps.append(folder);dirs[:]=[];continue
+                files.extend(folder/n for n in sorted(names) if Path(n).suffix.lower()[1:] in conversion.FORMATS and (folder/n).is_file() and not (folder/n).is_symlink())
         elif p.suffix.lower()[1:] in conversion.FORMATS: files.append(p)
         else: raise Failure('请选择 NSP、XCI、NSZ、XCZ 文件或包含这些文件的文件夹。')
     files=list(dict.fromkeys(files))
-    if not files: raise Failure('所选位置没有支持的游戏文件。')
-    with conversion.import_packages(c,files) as packages:
-        return import_containers(c,packages)
+    if not files and not dumps: raise Failure('所选位置没有支持的游戏文件。')
+    if files:
+        if not c.keys.exists(): raise Failure('请先导入玩家自己的 prod.keys。')
+        validate_keys(c.keys)
+    results=[dump.import_game(c,folder) for folder in dict.fromkeys(dumps)]
+    if files:
+        with conversion.import_packages(c,files) as packages:
+            results.extend(import_containers(c,packages)['imports'])
+    return {'imports':results}
 
 
 def container_packages(info):
@@ -110,6 +121,8 @@ def import_containers(c, files, *, unhide=True, expected_hashes=None):
                 raise Failure('托管源文件已丢失或内容发生改变，请重新导入。')
             with c.lock():
                 cat=c.catalog()
+                if any(g.get('sourceKind')=='dump' and g['packages'] and any(p['baseId']==g['id'] for p in packages) for g in cat['games']):
+                    raise Failure('同一游戏不能混用游戏包和解包目录，请先清理托管源文件。')
                 previous=[p for g in cat['games'] for p in g['packages'] if p['sha256']==sha]
                 old_ids={(p['titleId'],p['version'],p['type']) for p in previous}
                 new_ids={(p['titleId'],p['version'],p['type']) for p in packages}
@@ -136,6 +149,7 @@ def import_containers(c, files, *, unhide=True, expected_hashes=None):
                     if g is None:
                         g={'id':tid,'name':package.get('name') or ps.get(tid,{}).get('name',tid),'display':'','packages':[],'hidden':False}; cat['games'].append(g)
                     if unhide: g['hidden']=False
+                    g.pop('sourceKind',None)
                     g['packages'].append(package|{'path':str(dest.relative_to(c.library)),'size':dest.stat().st_size,'sha256':sha,'metadataSchema':metadata_schema})
                     if package.get('name'): g['name']=package['name']
                     selected=max((p for p in g['packages'] if p['type'] in ('base','update')),key=lambda p:p['version'],default={})
@@ -183,6 +197,8 @@ def catalog(c):
     except Failure: selected_engine = None
     if selected_engine: refresh_container_metadata(c)
     c.begin('读取游戏库',1,1); cat=c.catalog(); ps=profiles(c.engine) if selected_engine else {}
+    from incremental import pipeline_version
+    pipeline=pipeline_version()
     for g in cat['games']:
         g['missing']=requirements(g,ps.get(g['id']),bool(selected_engine and selected_engine.get('derivedProfiles'))); g['compatibility']=ps.get(g['id'],{}).get('compatibility','unsupported')
         p=ps.get(g['id'])
@@ -198,6 +214,7 @@ def catalog(c):
         g['runtimeVersion']=manifest.get('version','')
         g['inputConfig']=manifest.get('inputConfig',True) if manifest else bool(selected_engine and selected_engine['inputConfig'])
         g['needsPreparation']=bool(manifest) and (selected_engine is not None and manifest.get('engine') != selected_engine['fingerprint'] or manifest.get('sourceHashes') != sorted(x['sha256'] for x in g['packages']))
+        if manifest and manifest.get('pipeline')!=pipeline: g['needsPreparation']=True
     cat['profiles']=[{'id':x['id'],'name':x['name'],'compatibility':x['compatibility'],'version':x['builds'].get(x['package'],{}).get('display','')} for x in ps.values()]
     cat['jobs']=[read(p) for p in (c.private/'jobs').glob('*.json') if p!=c.jobpath]
     cat['keys']=key_status(c)
@@ -222,17 +239,31 @@ def clean(c):
             def source_path(package):
                 return contained(sources,c.library/package['path'])
             candidates={source_path(p) for p in game['packages']}
+            if game.get('sourceKind')=='dump':
+                # Re-importing a changed tree can leave an unreferenced revision.
+                # Explicit source cleanup also removes those managed revisions.
+                parent=contained(sources,sources/g['id'])
+                candidates.update(contained(sources,p) for p in parent.glob('*.dump')
+                    if re.fullmatch(r'[0-9A-F]{16}_v[0-9]+_[0-9a-f]{64}\.dump',p.name))
             # Hidden games still own their files. A container may live under another title.
             shared={source_path(p) for other in cat['games'] if other['id']!=g['id'] for p in other['packages']}
             paths=sorted(candidates-shared)
-            if any(p.is_dir() for p in paths): raise Failure('托管源文件路径无效，未执行清理。')
+            if any(p.is_dir() and not (p.suffix=='.dump' and all(x.get('sourceKind')=='dump' for x in game['packages'] if source_path(x)==p)) for p in paths):
+                raise Failure('托管源文件路径无效，未执行清理。')
             c.check()
             # Detach references first: cancellation can leave orphans, never dangling
             # references belonging to another game or a partially deleted catalogue.
             game['packages']=[]
             c.save_catalog(cat)
             for index,path in enumerate(paths,1):
-                c.check();path.unlink(missing_ok=True)
+                c.check()
+                if path.is_dir():
+                    for entry in sorted(path.rglob('*'),key=lambda p:len(p.parts),reverse=True):
+                        c.check()
+                        if entry.is_symlink() or entry.is_file(): entry.unlink()
+                        else: entry.rmdir()
+                    path.rmdir()
+                else: path.unlink(missing_ok=True)
                 c.emit(done=index,total=len(paths),unit='files')
             return {'retainedShared':len(candidates & shared)}
         if kind=='cache':

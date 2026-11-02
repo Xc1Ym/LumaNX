@@ -45,7 +45,7 @@ struct ContentView: View {
                 .toolbar {
                     ToolbarItemGroup(placement:.primaryAction) {
                         if store.selection == "library" || store.selection == nil {
-                        Button(action:store.chooseGames){Label(L(store.importActionTitle),systemImage:"plus")}.help(L("先检查环境、选择游戏库并导入 prod.keys，再添加游戏（⌘O）"))
+                        Button(action:store.chooseGames){Label(L(store.importActionTitle),systemImage:"plus")}.help(L("添加游戏包或 Switch 2 已解包目录（⌘O）；已解包目录无需密钥。"))
                         }
                     }
                 }
@@ -88,8 +88,8 @@ struct ContentView: View {
                     VStack(spacing:16) {
                         BrandMark(size:104)
                         Text(L("收藏你的第一段旅程")).font(.title2.bold())
-                        Text(!store.environmentReady ? L("先检查系统、Xcode 与 Metal 组件，\n再选择游戏库、导入密钥和游戏。") : store.hasImportedKeys ? L("添加 NSP、XCI、NSZ 或 XCZ 游戏文件。\n压缩文件自动解压，文件齐全后自动准备。") : L("先选择游戏库并导入 prod.keys，\n再添加游戏、准备运行文件。")).font(.callout).foregroundStyle(.secondary).multilineTextAlignment(.center)
-                        Button(action:store.chooseGames){Label(L(store.importActionTitle),systemImage:store.hasImportedKeys ? "plus" : "key")}.buttonStyle(.glassProminent).controlSize(.large)
+                        Text(!store.environmentReady ? L("先检查系统、Xcode 与 Metal 组件，\n再选择游戏库、导入密钥和游戏。") : L("添加游戏包或 Switch 2 已解包目录。\n游戏包需要 prod.keys；已解包目录无需密钥。")).font(.callout).foregroundStyle(.secondary).multilineTextAlignment(.center)
+                        Button(action:store.chooseGames){Label(L(store.importActionTitle),systemImage:"plus")}.buttonStyle(.glassProminent).controlSize(.large)
                         Text(L("游戏、密钥与固件均需自行提供")).font(.caption).foregroundStyle(.tertiary)
                     }.frame(maxWidth:.infinity,maxHeight:.infinity)
                 } else {
@@ -147,6 +147,9 @@ struct GameDetail: View {
             if game.needsPreparation==true {
                 Label(L("有更新待准备"),systemImage:"arrow.triangle.2.circlepath").font(.caption).foregroundStyle(.secondary)
                     .help(L("新增内容或引擎更新尚未准备；启动将使用上次成功版本。"))
+            }
+            if game.sourceKind=="dump" {
+                Label(L("已解包游戏 · 仅 Mac · 实验性"),systemImage:"desktopcomputer").font(.caption).foregroundStyle(.secondary)
             }
             if game.ready==true {
                 Button {store.launch(game)} label:{Label(L("启动游戏"),systemImage:"play.fill").frame(maxWidth:.infinity)}.buttonStyle(.glassProminent).controlSize(.large).disabled(store.executionBusy || !store.queue.isEmpty)
@@ -237,8 +240,8 @@ struct GameDetail: View {
                     toolDivider
                 }
                 Button {store.generateIPA(game)} label:{GameToolLabel(title:"生成 IPA…",symbol:"iphone.and.arrow.forward",accessory:"chevron.right")}
-                    .disabled(!game.buildable || store.executionBusy || !store.queue.isEmpty)
-                    .help(L("导出 iPhone / iPad 未签名包；需 Xcode iOS 平台及 XcodeGen。"))
+                    .disabled(!game.canExportIPA || !game.buildable || store.executionBusy || !store.queue.isEmpty)
+                    .help(game.canExportIPA ? L("导出 iPhone / iPad 未签名包；需 Xcode iOS 平台及 XcodeGen。") : L("已解包游戏目前仅支持 Mac 运行，尚未开放 IPA 导出。"))
                 toolDivider
                 if game.id=="01007EF00011E000" {
                     Button {store.migrate(game)} label:{GameToolLabel(title:"迁移已有旷野之息构建…",symbol:"arrow.down.doc",accessory:"chevron.right")}
@@ -725,14 +728,15 @@ struct OnboardingView: View {
                         Button(L("选择游戏库文件夹…"),action:store.chooseLibrary).buttonStyle(.glassProminent)
                         Text(store.preferences.library.isEmpty ? L("尚未选择") : store.preferences.library).font(.callout).textSelection(.enabled)
                     } else if step==2 {
-                        Text(L("先导入 prod.keys，应用才能读取游戏内容。通常只需导入一次，多款游戏可共用这份密钥集合。")).foregroundStyle(.secondary)
+                        Text(L("游戏包需要 prod.keys；Switch 2 已解包目录可跳过此步，无需密钥。")).foregroundStyle(.secondary)
                         Button(L("导入 prod.keys…"),action:store.importKeys).buttonStyle(.glassProminent).disabled(store.importingKeys)
+                        Button(L("仅添加已解包游戏，跳过密钥")){store.onboardingStep=3}.disabled(store.importingKeys)
                         if let task=store.tasks.first(where:{$0.operation=="keys" && $0.active}) {TaskProgressView(task:task,compact:true)}
                         Label(L(store.keyStatus),systemImage:store.hasImportedKeys ? "checkmark.circle.fill" : "key").foregroundStyle(store.hasImportedKeys ? Color.teal : .secondary)
                         Text(L("导入时检查格式，首次读取游戏时验证解密能力。密钥仅保存在本机私有目录，源文件保持原样。")).font(.caption).foregroundStyle(.secondary)
                     } else {
-                        Label(L("密钥已就绪，可以添加游戏"),systemImage:"checkmark.circle.fill").foregroundStyle(.teal)
-                        Text(L("选择支持版本的 NSP 本体、更新及可选 DLC，或扫描所在文件夹。导入时会验证密钥和文件内容，缺少版本会明确提示。")).foregroundStyle(.secondary)
+                        Label(L("可以添加游戏"),systemImage:"checkmark.circle.fill").foregroundStyle(.teal)
+                        Text(L("选择游戏包，或包含 base/exefs 与 base/romfs 的已解包根目录。更新需要合并后的完整 RomFS；导入后校验版本并准备 Mac 运行文件。")).foregroundStyle(.secondary)
                         Toggle(L("导入后自动准备支持的游戏"),isOn:Binding(get:{store.prepareAfterImport},set:{store.prepareAfterImport=$0}))
                         Text(L("文件齐全后加入准备队列；完成后由你点击“启动游戏”。可在设置中关闭自动准备。")).font(.caption).foregroundStyle(.secondary)
                         Label(L("环境检查已通过，导入后会再次检查准备条件。"),systemImage:"checkmark.shield").font(.caption).foregroundStyle(.secondary)
@@ -753,11 +757,10 @@ struct OnboardingView: View {
                 Button(step==3 ? L("添加游戏…") : L("继续")) {
                     if step<3 {store.onboardingStep+=1}
                     else {store.finishOnboarding(addGames:true)}
-                }.buttonStyle(.glassProminent).disabled(!store.environmentReady || step==1 && store.preferences.library.isEmpty || step>=2 && (!store.hasImportedKeys || store.importingKeys))
+                }.buttonStyle(.glassProminent).disabled(!store.environmentReady || step==1 && store.preferences.library.isEmpty || step==2 && (!store.hasImportedKeys || store.importingKeys))
             }
         }.padding(24).frame(width:860,height:660).background(LibraryBackdrop()).tint(WorkspacePalette.accent)
         .onAppear {store.checkEnvironmentAtStartup()}
-        .onChange(of:store.hasImportedKeys) { _,ready in if !ready && step==3 {store.onboardingStep=2} }
         .alert(L("操作未完成"),isPresented:Binding(get:{store.error != nil},set:{if !$0 {store.error=nil}})) {
             let diagnostic=store.errorDiagnostic
             Button(L("知道了"),role:.cancel) {store.error=nil}

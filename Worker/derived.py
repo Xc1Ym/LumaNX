@@ -26,6 +26,7 @@ def supported(engine):
 
 
 def plan(game, profile, enabled=False):
+    if game.get('sourceKind')=='dump': enabled=False
     packages=[p for p in game['packages'] if p['type'] in ('base','update')]
     selected=max(packages,key=lambda p:p['version'],default=None) if enabled else None
     version=f"v{selected['version']}" if selected else profile['package']
@@ -99,6 +100,7 @@ def seal_profile(st,gp):
 
 
 def shaders(c,st,up,repo,root,env,gp,selected,patched,dirs,sources,target):
+    if st.graph: st.graph.decoder=any(sources.get(k,(False,))[0] for k in ('oodle_packs','ue_legacy'))
     logs=root/'logs';sh=root/'shader';sh.mkdir(exist_ok=True)
     graphics=sources['graphics'][0]
     if sources['glslc_capture'][0]:

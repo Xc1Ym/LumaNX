@@ -277,16 +277,16 @@ final class WorkerOutput: @unchecked Sendable {
         onboardingStep = !environmentReady ? 0 : preferences.library.isEmpty ? 1 : hasImportedKeys ? 3 : 2
         showOnboarding = true
     }
-    func importPrerequisitesReady() -> Bool {
+    func importPrerequisitesReady(requiresKeys: Bool = true) -> Bool {
         guard environmentReady else { onboardingStep = 0; showOnboarding = true; checkEnvironment(); return false }
         guard !preferences.library.isEmpty else { onboardingStep = 1; showOnboarding = true; return false }
-        guard hasImportedKeys, FileManager.default.isReadableFile(atPath:privateRoot.appendingPathComponent("keys/prod.keys").path) else {
+        guard !requiresKeys || hasImportedKeys && FileManager.default.isReadableFile(atPath:privateRoot.appendingPathComponent("keys/prod.keys").path) else {
             hasImportedKeys = false; keyStatus = "请先导入 prod.keys，再添加游戏"; onboardingStep = 2; showOnboarding = true; return false
         }
         return true
     }
     func finishOnboarding(addGames: Bool) {
-        guard importPrerequisitesReady() else { return }
+        guard importPrerequisitesReady(requiresKeys:false) else { return }
         preferences.onboardingComplete = true; savePreferences()
         addGamesAfterOnboarding = addGames; showOnboarding = false
     }
@@ -332,13 +332,17 @@ final class WorkerOutput: @unchecked Sendable {
         worker("keys",extra:["path":url.path]) { r in self.hasImportedKeys = true; self.keyStatus = r["message"] as? String ?? "已导入"; self.refresh() }
     }
     func chooseGames() {
-        guard importPrerequisitesReady() else { return }
+        guard importPrerequisitesReady(requiresKeys:false) else { return }
         let p = NSOpenPanel(); p.title = L("添加游戏文件或扫描文件夹"); p.allowsMultipleSelection = true; p.canChooseDirectories = true; p.canChooseFiles = true
         p.allowedContentTypes = ["nsp","xci","nsz","xcz"].compactMap { UTType(filenameExtension:$0) }
         if p.runModal() == .OK { addGames(p.urls) }
     }
     func addGames(_ urls: [URL]) {
-        guard importPrerequisitesReady(), !urls.isEmpty else { return }
+        guard !urls.isEmpty else { return }
+        let dumps = urls.allSatisfy { url in
+            FileManager.default.fileExists(atPath:url.appendingPathComponent("base/exefs/main.npdm").path)
+        }
+        guard importPrerequisitesReady(requiresKeys:!dumps) else { return }
         let libraryId = preferences.libraryId
         let prepare = prepareAfterImport
         selection = "tasks"
@@ -523,7 +527,7 @@ final class WorkerOutput: @unchecked Sendable {
         }
     }
     func enqueue(_ game: Game) {
-        guard importPrerequisitesReady() else { return }
+        guard importPrerequisitesReady(requiresKeys:game.sourceKind != "dump") else { return }
         guard game.buildable else { error = (game.missing ?? []).joined(separator:"\n"); return }
         guard !queue.contains(game.id), !tasks.contains(where: { $0.operation == "build" && $0.gameId == game.id && $0.active && !$0.id.hasPrefix("queued-") }) else { return }
         queue.append(game.id)
@@ -558,6 +562,7 @@ final class WorkerOutput: @unchecked Sendable {
         selection = "tasks"; executionTask = worker("migrate",extra:["gameId":game.id,"path":url.path])
     }
     func generateIPA(_ game: Game, destination: URL? = nil) {
+        guard game.canExportIPA else { error = "已解包游戏目前仅支持 Mac 运行，尚未开放 IPA 导出。"; return }
         guard !executionBusy, queue.isEmpty else { error = "构建与游戏运行互斥，请等待当前任务结束。"; return }
         guard importPrerequisitesReady() else { return }
         guard game.buildable else { error = (game.missing ?? []).joined(separator:"\n"); return }

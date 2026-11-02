@@ -8,7 +8,7 @@ See the [complete environment and repair guide](Environment.md) for every depend
 2. Open LumaNX. The setup assistant checks hardware, macOS, Xcode, Metal, bundled tools, and free space. **Get Xcode on the App Store** opens Apple's listing. Open Xcode once to accept its license and complete initial setup. Return to LumaNX, choose the correct Developer directory if necessary, and check again. Install Metal through the app if it is missing.
 3. Wait for the included source snapshot and compiled reader to initialize automatically in the private cache. Use **More tools → Repair bundled engine** if initialization fails. Packaged apps need no separate nxnative download, .NET SDK or NuGet restore. Check again after preparation.
 4. Choose an empty folder for your managed library. External drives are supported; keep the drive connected during preparation and play. Large games can require tens of gigabytes for source copies and build caches.
-5. Import your own **prod.keys**. Keys are stored privately on this Mac and excluded from diagnostics. Format is checked locally; decryption is verified while reading a game.
+5. For game packages, import your own **prod.keys**. Keys are stored privately on this Mac and excluded from diagnostics. Format is checked locally; decryption is verified while reading a game. For decrypted Switch 2 folders, choose **Skip keys and add decrypted games only**.
 6. Add authorized **NSP, XCI, NSZ or XCZ** base, update, and DLC files, or scan their folder. NSP and XCI are read directly by nxnative. NSZ/XCZ inputs are automatically decompressed to temporary NSP/XCI files with your library key, then imported without opening File conversion. The app matches content metadata rather than filenames and copies files into your library. Missing versions appear in game details.
 7. Supported games with all required files are prepared automatically by default. Watch **Tasks** for progress. You can cancel and retry; completed stages are reused only after validation. Preparation and game execution run separately and cannot run simultaneously.
 8. Choose **Launch game** after preparation completes. A failed preparation preserves the previous successful runtime. An engine update requires preparing the game again before using the new engine.
@@ -22,6 +22,12 @@ In **Settings → Language & appearance**, choose **System default**, **English*
 Use Settings to configure global controls, or game details for a game-specific override. Mapping changes apply on the next launch without rebuilding. Settings also provides diagnostics export and a setup-assistant shortcut.
 
 Game preparation and IPA export show milestone segments, the current step and its purpose, elapsed time, estimated time remaining and estimated finish. Hover over a segment for details. Initial times are reference estimates; successful uncached runs build local history, scoped to the game, target and toolchain. Cache hits and cancelled/failed runs do not train those estimates. Lighter fill is time-based estimation; numeric percentages still require measured counters. Estimates are approximate and are not completion deadlines.
+
+## Decrypted Switch 2 folders
+
+In **Add games**, choose the root folder containing `base/exefs/main.npdm`, `base/exefs/main`, `base/exefs/sdk` and `base/romfs`. No keys are needed. Optional updates go in `updates/<decimal version>/exefs` and `romfs`; their RomFS must be the complete patched tree, never a delta. Optional DLC uses `dlc/<Title ID>/<number>/romfs`. See the [README example](../README.md#decrypted-switch-2-games-mac-experimental).
+
+Import checks program and NSO build IDs, then copies and verifies managed trees without changing the originals. Games need an existing nxnative profile. Missing required versions and mismatched build IDs block preparation; directory sources never derive a different version automatically. Prepared games use library launching, saves, caches and runtime rollback. Only Mac preparation is enabled; IPA export is unavailable. Folders without control data use a default cover. Actual gameplay coverage depends on upstream game notes and local testing.
 
 ## File conversion
 
@@ -40,6 +46,8 @@ Choose **Generate IPA…** in game details and save outside the managed library.
 Wait for any running game and the preparation queue to finish. The export appears in Tasks with progress, cancellation and retry; completed exports open in Finder. A failed or cancelled export preserves the previous IPA, Mac runtime and saves. Sign the result with your installation tool before installing it. iOS device and game compatibility depend on your selected engine; Mac gameplay results do not validate iOS gameplay.
 
 ## Build errors and shader warnings
+
+Preparation now checks dependencies per stage. A controller-only host change reuses extraction, rewritten modules and shaders, then updates the Mac host and installed runtime. Game or toolchain changes rebuild the affected producers and their dependent stages. All reused outputs are checked; source verification still reads game files. Mac and iOS workspaces remain separate. Legacy caches are adopted only when their immutable engine provenance can be verified; otherwise affected stages rebuild once. See the [incremental build details](增量构建.md) (Chinese).
 
 Long operations share progress bars in Tasks, the global task banner, setup and Settings. Imports, byte/copy/cache verification, engine preparation, game/shader builds, IPA export, environment/component operations, cleanup and diagnostics report real counters where available. Unknown or estimated totals use an indeterminate linear bar with elapsed time; ordinary log/warning messages preserve progress. You can open **View all tasks** while using another page.
 

@@ -230,6 +230,9 @@ class WorkerTests(unittest.TestCase):
         game=self.quiet(library.catalog,self.ctx)['games'][0]
         self.assertTrue(game['ready']);self.assertTrue(game['needsPreparation'])
         atomic(runtime/'manifest.json',dict(manifest,engine=engine.inspect_source(self.ctx)['fingerprint']))
+        self.assertTrue(self.quiet(library.catalog,self.ctx)['games'][0]['needsPreparation'])
+        from incremental import pipeline_version
+        atomic(runtime/'manifest.json',dict(manifest,engine=engine.inspect_source(self.ctx)['fingerprint'],pipeline=pipeline_version()))
         self.assertFalse(self.quiet(library.catalog,self.ctx)['games'][0]['needsPreparation'])
         self.assertEqual((runtime/'sentinel').read_text(),'last successful version')
 

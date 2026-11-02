@@ -94,11 +94,7 @@ def validate_shaders(path, gp, repo):
     raise Failure('iOS 着色器产物缺失或编译平台不匹配，请重试。')
 
 
-def package(c, root, repo, env, gp, selected, patched, shaders, aoc, up=None):
-    out = destination(c)
-    validate_shaders(shaders, gp, repo)
-    if shutil.disk_usage(out.parent).free < sum(p.stat().st_size for p in (selected/'RomFS').rglob('*') if p.is_file()) + 2**30:
-        raise Failure('IPA 保存磁盘空间不足，请释放空间后重试。')
+def compile_application(c, root, repo, env, gp, selected, patched, shaders, aoc, up=None):
     built = root/'ipa/game.ipa'; built.parent.mkdir(exist_ok=True)
     font = next((p for p in (Path('/System/Library/Fonts/Supplemental/Arial Unicode.ttf'), Path('/System/Library/Fonts/Helvetica.ttc')) if p.is_file()), None)
     if font is None: raise Failure('找不到本机系统字体。')
@@ -125,8 +121,29 @@ def package(c, root, repo, env, gp, selected, patched, shaders, aoc, up=None):
     try:c.run(['bash', repo/'dm/ios/tools/build_ipa.sh', built], root/'logs/build_ipa.log', packing,on_line=line)
     finally:
         if watch:up.PROG.watch(None)
+    return built
+
+
+def package(c, root, repo, env, gp, selected, patched, shaders, aoc, up=None):
+    from incremental import cache_object, hash_value, checkpoints
+    from core import atomic
+    out=destination(c)
+    validate_shaders(shaders,gp,repo)
+    if shutil.disk_usage(out.parent).free < sum(p.stat().st_size for p in (selected/'RomFS').rglob('*') if p.is_file()) + 2**30:
+        raise Failure('IPA 保存磁盘空间不足，请释放空间后重试。')
+    identity=read(root/'identity.json',{})
+    key=hash_value(dict(identity=identity,artifacts=checkpoints(root/'checkpoints.json'),name=c.game()['name'])) if identity.get('pipeline') else None
+    built=root/'ipa/game.ipa';record=root/'ipa/checkpoint.json';prior=cache_object(record)
+    reused=bool(key and prior.get('key')==key and not built.is_symlink() and built.is_file()
+        and built.stat().st_size==prior.get('size') and digest(built,c.progress)==prior.get('sha256'))
+    if reused:
+        ms.cached(c);c.emit('cache','已验证并复用完成阶段',done=1,total=1)
+    else:
+        atomic(record,{})
+        compile_application(c,root,repo,env,gp,selected,patched,shaders,aoc,up)
     ms.enter(c,'ipa_check','验证 IPA 完整性')
     validate(built, c)
+    if key: atomic(record,dict(key=key,size=built.stat().st_size,sha256=digest(built,c.progress)))
     ms.enter(c,'ipa_export','导出 IPA')
     # Copy to the destination volume before the atomic replace; cancellation keeps
     # any previous export, Mac release and saves intact.

@@ -22,14 +22,34 @@ class ShaderProgress:
         return {'done':done,'total':len(self.keys),'unit':'shaders','step':'编译并验证 Metal 库'}
 
 class Stages:
-    def __init__(self,c,root):
-        self.c=c; self.root=root; self.file=root/'checkpoints.json'; self.saved=read(self.file,{})
-        self.warningfile=root/'checkpoint-warnings.json';self.warnings=read(self.warningfile,{})
-    def snapshot(self,paths):
-        out={};files=[]
+    def __init__(self,c,root,graph=None,legacy=None):
+        from incremental import cache_object, checkpoints
+        self.c=c; self.root=root; self.file=root/'checkpoints.json'; self.saved=checkpoints(self.file)
+        self.warningfile=root/'checkpoint-warnings.json';self.warnings=cache_object(self.warningfile)
+        self.graph=graph;self.legacy=legacy or {}
+        self.inputfile=root/'stage-inputs.json';self.inputs={k:v for k,v in cache_object(self.inputfile).items() if isinstance(v,dict)}
+        self.rebuilt=[]
+    def layout(self,paths,name=''):
+        from incremental import excluded
+        files=[];directories=[]
         for path in paths:
             path=Path(path)
-            files.extend(p for p in (sorted(path.rglob('*')) if path.is_dir() else [path]) if p.is_file())
+            contained(self.root,path)
+            if not path.exists(): return None
+            entries=[path]+(sorted(path.rglob('*')) if path.is_dir() else [])
+            for p in entries:
+                self.c.check();rel=str(p.relative_to(self.root))
+                if excluded(name,rel): continue
+                if p.is_symlink(): return None
+                if p.is_dir(): directories.append(rel)
+                elif p.is_file(): files.append(p)
+                else: return None
+        return files,sorted(directories)
+    def snapshot(self,paths,name=''):
+        out={};files=[]
+        layout=self.layout(paths,name)
+        if layout is None: raise Failure('阶段没有生成完整产物，未记录成功缓存。')
+        files=layout[0]
         total=sum(p.stat().st_size for p in files);done=0
         self.c.emit('message','验证阶段产物')
         for p in files:
@@ -41,22 +61,36 @@ class Stages:
         if milestone: ms.enter(self.c,milestone,name)
         else: self.c.begin(name)
         old=self.saved.get(name)
+        wanted=self.graph.key(name,self.saved) if self.graph else None
+        prior=self.inputs.get(name,{})
+        if self.graph and wanted!=(prior.get('key') or self.legacy.get(name)): old=None
         valid=bool(old);done=0;total=sum(v[0] for v in old.values()) if old else 0
-        if old:
+        layout=self.layout(paths,name) if valid else None
+        if valid and (layout is None or {str(p.relative_to(self.root)) for p in layout[0]}!=set(old)
+                or prior.get('directories',layout[1])!=layout[1]): valid=False
+        if valid:
             for p,v in old.items():
                 self.c.check();path=self.root/p
                 if not path.is_file() or path.stat().st_size!=v[0] or digest(path,lambda n,t:self.c.progress(done+n,total))!=v[1]:valid=False;break
                 done+=v[0]
         if valid:
+            if self.graph:
+                self.inputs[name]=dict(key=wanted,directories=layout[1]);atomic(self.inputfile,self.inputs)
             ms.cached(self.c)
             for warning in self.warnings.get(name,[]): self.c.report(warning)
             self.c.emit('cache','已验证并复用完成阶段',done=1,total=1); return
+        # Invalidate the checkpoint before deleting or invoking a producer. A
+        # failed or cancelled rebuild can never promote partially written files.
+        self.saved.pop(name,None);self.inputs.pop(name,None)
+        atomic(self.file,self.saved);atomic(self.inputfile,self.inputs)
         for p in paths:
             if Path(p).is_dir(): shutil.rmtree(p)
             elif Path(p).exists(): Path(p).unlink()
-        fn(); self.c.check(); self.saved[name]=self.snapshot(paths)
+        fn(); self.c.check(); self.saved[name]=self.snapshot(paths,name)
+        if self.graph: self.inputs[name]=dict(key=wanted,directories=self.layout(paths,name)[1])
         self.warnings[name]=[d for d in self.c.job.get('diagnostics',[]) if d.get('stage')==name and d['severity']=='warning']
-        atomic(self.warningfile,self.warnings);atomic(self.file,self.saved)
+        atomic(self.warningfile,self.warnings);atomic(self.file,self.saved);atomic(self.inputfile,self.inputs)
+        self.rebuilt.append(name)
         self.c.emit('stageComplete','阶段完成',done=1,total=1)
 
 def tools(c,target='macos'):
@@ -72,12 +106,15 @@ def tools(c,target='macos'):
     result['spirv-cross']=digest(sc)
     result['runtime']=digest(c.runtime/'versions.json')
     result['macos-sdk']=subprocess.check_output(['xcrun','--sdk','macosx','--show-sdk-version'],env=env,text=True).strip()
+    result['macos-sdk-build']=subprocess.check_output(['xcrun','--sdk','macosx','--show-sdk-build-version'],env=env,text=True).strip()
     from engine import inspect_source, prepared_tools
     info = inspect_source(c)
     prepared = prepared_tools(c,info)
     result['engineSource'] = info['fingerprint']; result['engine'] = info['fingerprint']
     result['inputConfig'] = info['inputConfig']
     result['reader'] = digest(prepared/'tools/nx_extract/nx_extract.dll')
+    result['readerLibrary'] = digest(prepared/'tools/nx_extract/LibHac.dll')
+    result['readerSDK'] = read(prepared/'ready.json',{}).get('sdk','')
     if target == 'ios':
         from ipa import environment
         result['ios'] = environment(c)[1]
@@ -136,6 +173,8 @@ def container_runner(c, g):
 
 
 def prepare(c,g,target='macos'):
+    if g.get('sourceKind')=='dump' and target!='macos':
+        raise Failure('已解包游戏目前仅支持 Mac 运行，尚未开放 IPA 导出。')
     from engine import inspect_source
     info=inspect_source(c)
     dynamic=info.get('derivedProfiles',False) and getattr(c,'r',{}).get('operation')!='migrate'
@@ -143,11 +182,15 @@ def prepare(c,g,target='macos'):
     if missing: raise Failure('；'.join(missing))
     from derived import plan
     strategy=plan(g,profile,dynamic)
-    tc=tools(c,target); identity={'tools':tc,'sources':sorted(x['sha256'] for x in g['packages']),'game':g['id'],'target':target,'schema':2,'preparation':strategy}
+    from incremental import Graph, engine_matches, legacy_keys, pipeline_version, workspace
+    tc=tools(c,target); identity={'tools':tc,'sources':sorted(x['sha256'] for x in g['packages']),'game':g['id'],'target':target,'schema':3,'preparation':strategy,'pipeline':pipeline_version(target)}
     key=hashlib.sha256(json.dumps(identity,sort_keys=True).encode()).hexdigest()[:24]
-    root=c.library/'cache'/g['id']/key; root.mkdir(parents=True,exist_ok=True)
+    root=workspace(c,g,target,key)
+    c.legacyStageInputs=legacy_keys(c,root,g,target)
     repo=root/'engine'
-    if not (repo/'.source-ready').exists(): refresh_engine(c,root,tc)
+    from engine import prepared_tools
+    source=prepared_tools(c)/'source'
+    if not (repo/'.source-ready').is_file() or (repo/'.source-ready').read_text()!=tc['engineSource'] or not engine_matches(c,repo,source): refresh_engine(c,root,tc)
     env=c.env(g['id'],root); env['MACOSX_DEPLOYMENT_TARGET']='26.0'; env['J']=str(min(os.cpu_count() or 4,8))
     if target == 'ios':
         from ipa import environment
@@ -161,6 +204,7 @@ def prepare(c,g,target='macos'):
         from derived import select_registered
         gp=select_registered(gp,strategy['version'])
     ensure_chain_header(c,root,repo,env,tc,gp)
+    c.buildGraph=Graph(source,root,g,tc,strategy,target);c.buildGraph.profile=gp
     class Bridge(up.Progress):
         def __init__(self): super().__init__('off')
         def stage(self,name,poll=None,**kw):
@@ -209,7 +253,9 @@ def install(c,root,repo,gp,key,host,romfs,modules,shader,aoc=None,font=None):
         if not fontpath: raise Failure('找不到本机系统字体。')
         clone(fontpath,stage/'font/standard.ttf')
         c.run([sys.executable,repo/'dm/tools/make_ext_font.py',stage/'font/nintendo_ext.ttf'],root/'logs/font.log',c.env(gp.id,root))
-    manifest={'schema':1,'gameId':gp.id,'engine':read(root/'identity.json',{}).get('tools',{}).get('engine','external'),'cacheKey':key,'sourceHashes':read(root/'identity.json',{}).get('sources',[]),'chain':chain,'graphics':gp.get('graphics','nvn'),'version':gp.builds()[gp.get('package')]['display'],'inputConfig':read(root/'identity.json',{}).get('tools',{}).get('inputConfig',False),'created':time.time(),'preparationMode':'derived' if own else 'registered'}
+    manifest={'schema':1,'gameId':gp.id,'engine':read(root/'identity.json',{}).get('tools',{}).get('engine','external'),'cacheKey':key,'sourceHashes':read(root/'identity.json',{}).get('sources',[]),'chain':chain,'graphics':gp.get('graphics','nvn'),'version':gp.builds()[gp.get('package')]['display'],'inputConfig':read(root/'identity.json',{}).get('tools',{}).get('inputConfig',False),'created':time.time(),'preparationMode':'derived' if own else 'registered','pipeline':read(root/'identity.json',{}).get('pipeline')}
+    from incremental import runtime_inventory
+    manifest['artifacts']=runtime_inventory(c,stage)
     atomic(stage/'manifest.json',manifest)
     validate_runtime(stage,gp)
     if (dst/'current').exists():
@@ -249,7 +295,7 @@ def build(c,target='macos'):
         g=c.game(); c.begin('验证游戏、工具链与缓存',1,10)
         root,repo,env,up,gp,key=prepare(c,g,target)
         if hasattr(getattr(up,'PROG',None),'watch'): cleanup.callback(up.PROG.watch,None)
-        logs=root/'logs'; logs.mkdir(exist_ok=True); st=Stages(c,root)
+        logs=root/'logs'; logs.mkdir(exist_ok=True); st=Stages(c,root,getattr(c,'buildGraph',None),getattr(c,'legacyStageInputs',None))
         strategy=read(root/'identity.json',{}).get('preparation',{})
         own=strategy.get('mode')=='derived'
         versions=strategy.get('versions') or list(dict.fromkeys(gp.words('shader_versions',gp.get('package'))+[gp.get('package')]))
@@ -260,7 +306,10 @@ def build(c,target='macos'):
         ms.enter(c,'verify','校验游戏源文件');source_total=sum(x['size'] for x in sources);source_done=0
         for x in sources:
             c.check(); p=c.library/x['path']
-            if not p.is_file() or digest(p,lambda n,t:c.progress(source_done+n,source_total))!=x['sha256']: raise Failure('托管源文件已丢失或内容发生改变，请重新导入。')
+            if g.get('sourceKind')=='dump':
+                import dump
+                dump.verify(c,x)
+            elif not p.is_file() or digest(p,lambda n,t:c.progress(source_done+n,source_total))!=x['sha256']: raise Failure('托管源文件已丢失或内容发生改变，请重新导入。')
             source_done+=x['size']
         needed=sum(x['size'] for x in sources)*2+(10 if target=='ios' else 3)*2**30
         if shutil.disk_usage(c.library).free<needed and not st.saved: raise Failure(f'准备游戏需要约 {needed/2**30:.0f} GB 可用空间。')
@@ -271,20 +320,26 @@ def build(c,target='macos'):
         for index,ver in enumerate(versions):
             upd=next((c.library/x['path'] for x in g['packages'] if x['type']=='update' and f"v{x['version']}"==ver),None)
             d=root/'extract'/ver; dirs[ver]=d
-            st.run('解包与合并 '+ver,[d],lambda ver=ver,upd=upd: up.extract(c.nx(),c.keys,root/'extract',ver,c.library/base['path'],upd,None,logs,gp,**extraction),milestone=f'unpack-{index}')
+            if g.get('sourceKind')=='dump':
+                st.run('解包与合并 '+ver,[d],lambda d=d,upd=upd: dump.extract(c,upd or c.library/base['path'],d),milestone=f'unpack-{index}')
+            else:
+                st.run('解包与合并 '+ver,[d],lambda ver=ver,upd=upd: up.extract(c.nx(),c.keys,root/'extract',ver,c.library/base['path'],upd,None,logs,gp,**extraction),milestone=f'unpack-{index}')
         if own:
             import derived
             gp,sources_info=derived.prepare_profile(c,st,up,gp,root,repo,env,dirs[strategy['version']],strategy['version'])
+            if st.graph: st.graph.profile=gp
             c.emit('message','按实际游戏版本生成配置与着色器；可玩性仍需验证。')
         aoc=root/'aoc'; dlcs=[(int(x['titleId'],16),x['version'],c.library/x['path']) for x in g['packages'] if x['type']=='dlc']
         def dlc():
-            if dlcs: up.extract_aoc(c.nx(),c.keys,repo,root,int(gp.id,16),{'dlc':dlcs},logs)
+            if g.get('sourceKind')=='dump': dump.extract_dlc(c,[p for p in g['packages'] if p['type']=='dlc'],aoc,gp.id)
+            elif dlcs: up.extract_aoc(c.nx(),c.keys,repo,root,int(gp.id,16),{'dlc':dlcs},logs)
             else: aoc.mkdir(); (aoc/'.empty').write_text('no DLC')
         st.run('处理 DLC',[aoc],dlc,milestone='dlc')
         patched=root/('patched_'+gp.get('package')); selected=dirs[gp.get('package')]
         st.run('重写原生代码',[patched],lambda:up.rewrite(sys.executable,repo,selected/'ExeFS',patched,env,logs,gp),milestone='rewrite')
         if own:
             gp=up.refine_after_rewrite(gp,selected,patched);derived.seal_profile(st,gp)
+            if st.graph: st.graph.profile=gp
             sh=derived.shaders(c,st,up,repo,root,env,gp,selected,patched,dirs,sources_info,target)
         else:
             if capture_gl: st.run('采集运行时 GLSLC 着色器',[selected/'glslc_capture'],lambda:up.capture_glslc(repo,dirs,gp.get('package'),patched,root,env,logs,gp),milestone='capture_gl')
@@ -301,6 +356,7 @@ def build(c,target='macos'):
             else:
                 from derived import detect_sources, oodle_decoder
                 sources_info=detect_sources(up,repo,selected,gp)
+                if st.graph: st.graph.decoder=any(sources_info.get(k,(False,))[0] for k in ('oodle_packs','ue_legacy'))
                 if sources_info.get('ue_decode',(False,))[0]:
                     st.run('解码游戏着色器',[selected/'ue_shaders'],lambda:up.decode_ue_shaders(repo,dirs,gp.get('package'),patched,root,env,logs,gp))
                 oodle=oodle_decoder(up,repo,root,env,gp,patched,sources_info)
@@ -322,6 +378,17 @@ def build(c,target='macos'):
             ms.record(c);return result
         st.run('编译 Mac 主程序',[root/'tools/dmhost'],lambda:compile_host(c,up,repo,env,root,gp),milestone='host')
         ms.enter(c,'install')
+        current=c.library/'games'/g['id']/'current'
+        ready=read(current/'manifest.json',{})
+        if ready.get('cacheKey')==key and ready.get('artifacts'):
+            try:
+                from incremental import runtime_inventory
+                validate_runtime(current,gp)
+                if runtime_inventory(c,current)!=ready['artifacts']: raise Failure('运行目录不完整。')
+            except Failure: pass
+            else:
+                ms.cached(c);c.emit('cache','已验证并复用完成阶段',done=1,total=1)
+                ms.record(c);return {'path':str(current.resolve()),'cacheKey':key,'version':read(current/'manifest.json')['version']}
         result=install(c,root,repo,gp,key,root/'tools/dmhost',selected/'RomFS',patched,sh if gp.get('graphics','nvn') in ('vulkan','gl') else sh/'cache',aoc)
         ms.record(c);return result
 

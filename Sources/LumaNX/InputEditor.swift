@@ -6,6 +6,11 @@ import GameController
     @Published var name = L("未连接手柄")
     @Published var value = L("等待输入")
     var observers: [NSObjectProtocol] = []
+    static func faceLabels(_ pad: GCExtendedGamepad) -> [String] {
+        // GameController already names Nintendo buttons by their printed labels.
+        [(pad.buttonA.isPressed,"A"),(pad.buttonB.isPressed,"B"),
+         (pad.buttonX.isPressed,"X"),(pad.buttonY.isPressed,"Y")].compactMap { $0.0 ? $0.1 : nil }
+    }
     init() {
         for n in [NSNotification.Name.GCControllerDidConnect, .GCControllerDidDisconnect] { observers.append(NotificationCenter.default.addObserver(forName:n,object:nil,queue:.main) { [weak self] _ in Task { @MainActor in self?.refresh() } }) }
         refresh()
@@ -17,9 +22,7 @@ import GameController
         pad.valueChangedHandler = { [weak self] p,_ in DispatchQueue.main.async {
             guard let self else {return}
             self.value=String(format:L("左摇杆 %.2f, %.2f · 右摇杆 %.2f, %.2f · L2 %.2f · R2 %.2f"),p.leftThumbstick.xAxis.value,p.leftThumbstick.yAxis.value,p.rightThumbstick.xAxis.value,p.rightThumbstick.yAxis.value,p.leftTrigger.value,p.rightTrigger.value)
-            let identity="\(p.controller?.productCategory ?? "") \(p.controller?.vendorName ?? "")"
-            let nintendo=["Nintendo","Switch","Joy-Con","Pro Controller"].contains {identity.localizedCaseInsensitiveContains($0)}
-            for (pressed,label) in [(p.buttonA.isPressed,nintendo ? "B":"A"),(p.buttonB.isPressed,nintendo ? "A":"B"),(p.buttonX.isPressed,nintendo ? "Y":"X"),(p.buttonY.isPressed,nintendo ? "X":"Y")] {if pressed {self.value += " · "+label}}
+            for label in Self.faceLabels(p) { self.value += " · "+label }
         } }
     }
     deinit {for o in observers {NotificationCenter.default.removeObserver(o)}}

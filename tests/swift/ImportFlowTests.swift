@@ -67,7 +67,7 @@ print(json.dumps({'schema':1,'taskId':r['taskId'],'type':'result','state':'compl
     }
     func testMissingAndDeletedKeysRouteToKeyStepBeforeImport() async throws {
         let (root,store)=try fixture()
-        store.chooseGames()
+        XCTAssertFalse(store.importPrerequisitesReady())
         XCTAssertTrue(store.showOnboarding);XCTAssertEqual(store.onboardingStep,2)
         XCTAssertTrue(operations(root).isEmpty)
         store.showOnboarding=false;store.hasImportedKeys=true
@@ -75,6 +75,24 @@ print(json.dumps({'schema':1,'taskId':r['taskId'],'type':'result','state':'compl
         store.addGames([root.appendingPathComponent("中文 游戏.nsp")])
         XCTAssertFalse(store.hasImportedKeys);XCTAssertEqual(store.onboardingStep,2)
         XCTAssertTrue(operations(root).isEmpty)
+        await cleanup(root,store)
+    }
+    func testDumpImportAndPreparationDoNotRequireKeys() async throws {
+        let (root,store)=try fixture();store.prepareAfterImport=true;store.showOnboarding=false
+        try FileManager.default.removeItem(at:store.privateRoot.appendingPathComponent("keys/prod.keys"))
+        let folder=root.appendingPathComponent("Switch 2 中文目录")
+        try FileManager.default.createDirectory(at:folder.appendingPathComponent("base/exefs"),withIntermediateDirectories:true)
+        try Data("transport fixture".utf8).write(to:folder.appendingPathComponent("base/exefs/main.npdm"))
+        var entry=game("0400000000010000");entry["sourceKind"]="dump"
+        try configure(root,games:[entry],imports:[["id":"0400000000010000","duplicate":false]])
+        store.addGames([folder])
+        XCTAssertFalse(store.showOnboarding)
+        try await waitUntil {self.operations(root).contains{$0["operation"] as? String == "build"} && !store.executionBusy}
+        let dumped=Store.decode(Game.self,entry)!
+        XCTAssertFalse(dumped.canExportIPA)
+        store.generateIPA(dumped,destination:root.appendingPathComponent("blocked.ipa"))
+        XCTAssertNotNil(store.error)
+        XCTAssertFalse(operations(root).contains{$0["operation"] as? String == "exportIPA"})
         await cleanup(root,store)
     }
     func testIPARetryKeepsExportOperationAndDestination() async throws {

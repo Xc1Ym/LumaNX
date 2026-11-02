@@ -13,6 +13,8 @@
 
 LumaNX is a third-party graphical frontend for **[nxnative](https://github.com/seedds/nxnative)** on Apple Silicon Macs. Import your game files, prepare a Mac runtime, launch from your library, or export an unsigned IPA for iPhone and iPad. nxnative provides native execution and Metal graphics; LumaNX brings the workflow into a SwiftUI interface.
 
+**Switch 2 games supported by the bundled nxnative snapshot are now supported on Mac through decrypted-folder import.** Game/version compatibility follows the engine's registered profiles; preparation is incremental by stage.
+
 <img src="docs/screenshots/library-en.jpg" width="1000" alt="LumaNX 0.2.19 game library in light appearance">
 
 ## From files to a ready library
@@ -36,12 +38,27 @@ Current release: **0.2.20** · [Release notes](docs/RELEASE_NOTES.md)
 
 1. Download the ARM64 DMG from [Releases](https://github.com/Xc1Ym/LumaNX/releases/latest), check its SHA-256 against the release notes, and drag **LumaNX.app** into Applications. Packages currently use ad-hoc signing and are not notarized.
 2. Open LumaNX. Use the setup assistant to check your environment and **prepare engine tools**.
-3. Choose a game library and import your own `prod.keys`. Add game files, updates and DLC that you are authorized to use.
+3. Choose a game library and add games, updates and DLC that you are authorized to use. Packages require your own `prod.keys`; decrypted Switch 2 folders need no keys, so you can skip that setup step.
 4. Prepare a game, then choose **Launch game**. For mobile, choose **Generate IPA…** in game details.
 
 IPA export also needs Xcode's **iOS platform** and **XcodeGen** (`brew install xcodegen`). Sign the exported IPA with your installation tool before installing it.
 
 Compatibility varies by game, version and engine. Preparation success does not establish full gameplay compatibility; iOS device compatibility has not been validated. Back up saves before upgrading or experimenting.
+
+### Decrypted Switch 2 games (Mac, experimental)
+
+Choose **Add games**, then select the root folder containing `base/exefs` and `base/romfs`. LumaNX validates program and module build IDs, copies the trees into the library, and prepares and launches them using bundled nxnative without `prod.keys`. A registered nxnative profile and its required versions are necessary. Upstream documents opening-area Mac gameplay for Donkey Kong Bananza (`040074A01BF12000`, update `458752`); this does not establish compatibility with every Switch 2 title or the full game.
+
+```text
+DonkeyKongBananza/
+  base/exefs/                       main, main.npdm, sdk, rtld, etc.
+  base/romfs/
+  updates/458752/exefs/              optional update; decimal version number
+  updates/458752/romfs/              complete patched resources, not a delta
+  dlc/040074a01bf13001/0/romfs/       optional DLC
+```
+
+Updates are used as complete trees without overlaying the base again. Missing required versions or mismatched build IDs block preparation. A game cannot mix package and directory sources. Directory imports use the library's existing caches, saves and runtime rollback. Only Mac preparation is enabled; IPA export is disabled. LumaNX automated checks use synthetic files; real-game acceptance still requires gameplay testing. Compare upstream's [folder format](https://github.com/seedds/nxnative#switch-2-games) and [game notes](https://github.com/seedds/nxnative/blob/main/dm/games/040074A01BF12000/README.md).
 
 ## Interface
 

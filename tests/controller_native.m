@@ -110,15 +110,17 @@ int main(void) {
         int p=pad_slot_take(&g_slots,(__bridge const void *)c,"snapshot");assert(p==0);g_held[p]=c;
         GCControllerButtonInput *buttons[]={pad.buttonA,pad.buttonB,pad.buttonX,pad.buttonY};
         for (NSString *name in @[@"Nintendo Switch Pro Controller",@"Joy-Con (L/R)",@"Pro Controller",@"Xbox Wireless Controller",@"DualSense Wireless Controller",@"DualShock 4",@"Generic USB Controller"]) {
-            c.testName=name;c.testCategory=@"HID";
-            BOOL nintendo=[name containsString:@"Nintendo"]||[name containsString:@"Joy-Con"]||[name isEqualToString:@"Pro Controller"];
-            assert(luma_nintendo_layout(c)==nintendo);
-            uint64_t xbox[]={DM_BTN_A,DM_BTN_B,DM_BTN_X,DM_BTN_Y};
-            uint64_t switch_pad[]={DM_BTN_B,DM_BTN_A,DM_BTN_Y,DM_BTN_X};
+          for (NSString *category in @[@"HID",@"Switch Pro Controller",@"Nintendo Switch Joy-Con (L/R)"]) {
+            c.testName=name;c.testCategory=category;
+            // Nintendo's actual GameController ABI is label-based, as recorded
+            // by upstream pad_apple.h (hardware-tested in nxnative PR #650).
+            // The previous test incorrectly assumed buttonA meant physical B.
+            uint64_t labels[]={DM_BTN_A,DM_BTN_B,DM_BTN_X,DM_BTN_Y};
             for(int i=0;i<4;i++) {
-                [buttons[i] setValue:1];pad_read(pad);assert(received[p]==(nintendo?switch_pad[i]:xbox[i]));
+                [buttons[i] setValue:1];pad_read(pad);assert(received[p]==labels[i]);
                 [buttons[i] setValue:0];pad_read(pad);assert(received[p]==0);
             }
+          }
         }
         [pad.buttonA setValue:1];[pad.buttonB setValue:1];[pad.leftTrigger setValue:1];[pad.rightShoulder setValue:1];
         [pad.leftThumbstick setValueForXAxis:.75 yAxis:-.5];pad_read(pad);

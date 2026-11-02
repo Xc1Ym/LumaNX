@@ -64,8 +64,12 @@ def clone(src, dst, progress=None):
 def clone_tree(src, dst, tick=None):
     src, dst = Path(src), Path(dst)
     if tick: tick(0,0)
-    files = sorted(p for p in src.rglob('*') if p.is_file()); total = sum(p.stat().st_size for p in files); done = 0
+    entries=sorted(src.rglob('*'))
+    if src.is_symlink() or any(p.is_symlink() for p in entries): raise Failure('不接受指向游戏库之外的符号链接。')
+    files = [p for p in entries if p.is_file()]; total = sum(p.stat().st_size for p in files); done = 0
     dst.mkdir(parents=True, exist_ok=True)
+    for p in entries:
+        if p.is_dir(): (dst/p.relative_to(src)).mkdir(parents=True,exist_ok=True)
     for p in files:
         clone(p, dst / p.relative_to(src),(lambda n,t:tick(done+n,total)) if tick else None); done += p.stat().st_size
         if tick: tick(done, total)
