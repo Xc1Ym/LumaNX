@@ -28,6 +28,8 @@
 
 Switch Pro、Xbox、PlayStation 手柄通过 Apple GameController 框架接入。原生按键策略将 Switch A / Xbox A / PlayStation 叉键映射为游戏 A。更新引擎后，重新准备已有游戏即可应用运行时变更。
 
+当前版本：**0.2.20** · [发行说明](docs/RELEASE_NOTES.md)
+
 ## 开始使用
 
 **需要 Apple Silicon Mac 与 macOS 26 或更新版本。** 准备游戏还需完整 Xcode 及 Metal 组件。安装包内置 nxnative、元数据读取器、着色器翻译器与运行依赖。

@@ -1,14 +1,15 @@
-# LumaNX 0.2.19
+# LumaNX 0.2.20
 
 ## Changes
 
-- **Updated bundled engine.** Includes nxnative `710559cf53d2b9037f48b44f515e940f71b51f2b`, which adds Subnautica: Below Zero (`010014C011146000`) — tested on Apple Silicon Mac at 30 fps through the title, menu, new Survival game, hangar opening and the crash site; upstream notes one audio-device stall at the landing — and extends registered-shader decoding: Criterion `bnd2` bundles (Need for Speed: Hot Pursuit Remastered reads its ~2,112 GLSLC outputs from `SHADERS.BNDL`) and refreshed per-game shader tables across 211 profiles.
-- **Decoders prepared for registered shader builds.** The conversion worker builds the game decoders a profile registers for its shader toolchain, with regression tests for repeated profile derivation.
-- **Stricter daily-sync patch anchors.** The sync's SDK compatibility patch now fails loudly when upstream reformats the guarded phone-motion interface (previously it silently skipped), and worker import search paths are deduplicated across repeated derivations.
+- **Updated bundled engine.** Includes nxnative `cd859c38a8f8890ddbb57a23d6f45e23ba9e6651`, with upstream extraction, RomFS and shader preparation updates since 0.2.19. Re-prepare existing games to apply engine changes.
+- **Restored daily engine synchronization.** Sync patches now support upstream shared controller mappings and continue to validate unique patch anchors. The imported engine retains LumaNX's native controller button policy.
+- **Updated extraction compatibility.** The worker passes the selected application ID to newer upstream extractors, retains support for older signatures, and adapts Application/Patch content selection in the bundled reader.
+- **Refreshed documentation.** Bilingual READMEs include current interface previews, daily engine synchronization, weekly release cadence and the supported macOS source build sequence.
 
 ## Installation and validation
 
-Download **LumaNX-0.2.19-arm64.dmg** and verify the SHA-256 below. Quit the app and active tasks before replacing the application. The application identifier and existing libraries, saves and settings are retained.
+Download **LumaNX-0.2.20-arm64.dmg** and verify the SHA-256 below. Quit the app and active tasks before replacing the application. The application identifier and existing libraries, saves and settings are retained.
 
 Requires Apple Silicon and macOS 26+. Uses **ad-hoc signing and is not notarized**. Game preparation requires full Xcode with Metal; IPA export also requires the iOS platform and XcodeGen.
 
@@ -18,11 +19,12 @@ The release workflow runs Python and Swift regression tests, native controller a
 
 ## 中文说明
 
-- **同步内置引擎。** 包含 nxnative `710559cf53d2b9037f48b44f515e940f71b51f2b`：新增 Subnautica: Below Zero（`010014C011146000`），在 Apple Silicon Mac 上以 30 fps 通过标题、菜单、新生存档、机库开场与坠机点实测；上游记录降落阶段有一次音频设备停顿。注册着色器解码扩展：Criterion `bnd2` 包（Need for Speed: Hot Pursuit Remastered 从 `SHADERS.BNDL` 读取约 2,112 个 GLSLC 输出），并刷新 211 个游戏档案的着色器表。
-- **转换工作进程按档案构建注册的解码器。** 工作进程为档案注册的着色器工具链构建所需的游戏解码器，重复档案推导带回归测试。
-- **每日同步补丁锚点更严格。** 同步的 SDK 兼容补丁在上游改写受保护接口的排版时会明确报错（此前会静默跳过），工作进程的导入搜索路径在重复推导下去重。
+- **更新内置引擎。** 包含 nxnative `cd859c38a8f8890ddbb57a23d6f45e23ba9e6651`，汇总 0.2.19 之后上游的解包、RomFS 与着色器准备更新。已有游戏需要重新准备才能应用引擎变更。
+- **恢复每日引擎同步。** 同步补丁兼容上游共享手柄映射，并继续严格校验补丁锚点；导入引擎保留 LumaNX 的原生手柄按键策略。
+- **适配新版解包接口。** 工作进程向新版上游解包器传入选定应用 ID，同时兼容旧签名，并适配内置读取器的 Application/Patch 内容筛选。
+- **刷新使用与编译文档。** 中英文 README 包含当前界面预览、每日引擎同步、每周发布节奏，以及受支持的 macOS 源码编译顺序。
 
-下载 **LumaNX-0.2.19-arm64.dmg**，按下方 SHA-256 校验，退出应用及任务后替换应用。应用标识、现有游戏库、存档与设置保持兼容。
+下载 **LumaNX-0.2.20-arm64.dmg**，按下方 SHA-256 校验，退出应用及任务后替换应用。应用标识、现有游戏库、存档与设置保持兼容。
 
 要求 Apple Silicon、macOS 26 及以上；采用临时签名，尚未公证。准备游戏需完整 Xcode 与 Metal，导出 IPA 另需 iOS 平台与 XcodeGen。
 
