@@ -3,32 +3,48 @@ import AppKit
 import GameController
 
 @MainActor final class ControllerMonitor: ObservableObject {
-    @Published var name = L("未连接手柄")
-    @Published var value = L("等待输入")
-    var observers: [NSObjectProtocol] = []
-    static func faceLabels(_ pad: GCExtendedGamepad) -> [String] {
-        // GameController already names Nintendo buttons by their printed labels.
-        [(pad.buttonA.isPressed,"A"),(pad.buttonB.isPressed,"B"),
-         (pad.buttonX.isPressed,"X"),(pad.buttonY.isPressed,"Y")].compactMap { $0.0 ? $0.1 : nil }
+    struct Device: Identifiable {
+        let controller: GCController
+        var id: ObjectIdentifier { ObjectIdentifier(controller) }
+        var key: String? { ControllerLayouts.key(controller) }
+        var name: String { controller.vendorName ?? L("已连接手柄") }
     }
-    static func reading(_ pad:GCExtendedGamepad) -> String {
+    @Published var devices: [Device] = []
+    @Published var selectedID: ObjectIdentifier? { didSet { updateReading() } }
+    @Published var value = L("等待输入")
+    var layouts = ControllerLayouts() { didSet { updateReading() } }
+    var selected: Device? { devices.first { $0.id == selectedID } }
+    var name: String { selected?.name ?? L("未连接手柄") }
+    var observers: [NSObjectProtocol] = []
+    static func faceLabels(_ pad: GCExtendedGamepad, layout: ControllerLayout = .reported) -> [String] {
+        zip([pad.buttonA,pad.buttonB,pad.buttonX,pad.buttonY],layout.faceLabels).compactMap { $0.0.isPressed ? $0.1 : nil }
+    }
+    static func reading(_ pad:GCExtendedGamepad, layout: ControllerLayout = .reported) -> String {
         let axes=String(format:L("左摇杆 %.2f, %.2f · 右摇杆 %.2f, %.2f · L2 %.2f · R2 %.2f"),pad.leftThumbstick.xAxis.value,pad.leftThumbstick.yAxis.value,pad.rightThumbstick.xAxis.value,pad.rightThumbstick.yAxis.value,pad.leftTrigger.value,pad.rightTrigger.value)
-        return ([axes]+faceLabels(pad)).joined(separator:" · ")
+        return ([axes]+faceLabels(pad,layout:layout)).joined(separator:" · ")
     }
     init() {
         for n in [NSNotification.Name.GCControllerDidConnect, .GCControllerDidDisconnect] { observers.append(NotificationCenter.default.addObserver(forName:n,object:nil,queue:.main) { [weak self] _ in Task { @MainActor in self?.refresh() } }) }
         refresh()
     }
-    func refresh() {
-        for c in GCController.controllers() {c.extendedGamepad?.valueChangedHandler=nil}
-        guard let c = GCController.controllers().first(where:{$0.extendedGamepad != nil}),let pad=c.extendedGamepad else {name=L("未连接手柄");value=L("所有输入已清空");return}
-        name=c.vendorName ?? L("已连接手柄")
-        pad.valueChangedHandler = { [weak self] p,_ in DispatchQueue.main.async {
-            guard let self else {return}
-            self.value=Self.reading(p)
-        } }
+    func updateReading() {
+        guard let device=selected, let pad=device.controller.extendedGamepad else { value=L("所有输入已清空"); return }
+        value=Self.reading(pad,layout:layouts.layout(for:device.key))
     }
-    deinit {for o in observers {NotificationCenter.default.removeObserver(o)}}
+    func refresh(controllers: [GCController] = GCController.controllers()) {
+        for device in devices { device.controller.extendedGamepad?.valueChangedHandler=nil }
+        devices=controllers.filter { $0.extendedGamepad != nil }.map { Device(controller:$0) }
+        if !devices.contains(where: { $0.id == selectedID }) { selectedID=devices.first?.id }
+        for device in devices {
+            device.controller.extendedGamepad?.valueChangedHandler = { [weak self] _,_ in
+                DispatchQueue.main.async { self?.updateReading() }
+            }
+        }
+        updateReading()
+    }
+    deinit {
+        for o in observers { NotificationCenter.default.removeObserver(o) }
+    }
 }
 struct InputEditor: View {
     @EnvironmentObject var store: Store
@@ -47,6 +63,19 @@ struct InputEditor: View {
             }
             CompactDisclosure(title:"原生手柄自动识别",subtitle:controller.name,symbol:"gamecontroller.fill") {
                 Text(L("原生手柄：Switch Pro A / Xbox A / PS 叉键 → 游戏 A，无需配置。")).font(.caption).foregroundStyle(.secondary)
+                if !controller.devices.isEmpty {
+                    Picker(L("设备"),selection:$controller.selectedID) {
+                        ForEach(Array(controller.devices.enumerated()),id:\.element.id) { index,device in
+                            Text("\(index+1) · \(device.name) · \(device.controller.productCategory)").tag(Optional(device.id))
+                        }
+                    }
+                    Picker(L("面键布局"),selection:Binding(get:{store.controllerLayouts.layout(for:controller.selected?.key)},set:{mode in
+                        if let key=controller.selected?.key {store.saveControllerLayout(mode,for:key)}
+                    })) { ForEach(ControllerLayout.allCases,id:\.self) { Text($0.name).tag($0) } }
+                    .disabled(controller.selected?.key == nil)
+                    Text(L("按报告字母保留现有按键；按 Switch 物理位置交换 A/B、X/Y。输入测试立即预览，游戏下次启动生效；旧运行版本需重新准备。")).font(.caption).foregroundStyle(.secondary)
+                    Text(L("按设备报告的名称和类别保存；同型号且身份相同的手柄共享设置。不同模式若报告不同身份则分别保存。")).font(.caption).foregroundStyle(.secondary)
+                }
             }.padding(12).glassSurface(14)
             if !(game?.inputConfig ?? store.engineSupportsInput) {
                 Text(L("当前引擎未声明 DM_INPUT_CONFIG 支持。自定义映射仅保存，键鼠使用引擎默认操作；原生手柄自动识别不受影响。")).font(.caption).foregroundStyle(.orange)
@@ -65,6 +94,9 @@ struct InputEditor: View {
                 Spacer();Button(L("保存配置")) {store.saveInput(config,for:game)}.buttonStyle(.glassProminent).disabled(!config.conflicts.isEmpty || recording != nil)
             }
         }.padding(24).frame(width:1000,height:740).background(LibraryBackdrop()).tint(WorkspacePalette.accent)
+        .onAppear {controller.layouts=store.controllerLayouts;controller.refresh()}
+        .onDisappear {controller.refresh(controllers:[])}
+        .onChange(of:store.controllerLayouts) {_,value in controller.layouts=value}
         .background(EventRecorder(recording:recording != nil,test:test && tab=="test",onKey:{ b in
             if let t=recording {if b.code != 53 {config.keyboard[t]=b};recording=nil}
             else {if b.code==53 {test=false;testText=L("输入测试已结束")} else {testText=L("键盘：\(keyName(b))")}}
@@ -114,7 +146,7 @@ struct InputEditor: View {
                             }
                         }
                         CompactDisclosure(title:"输入行为说明",symbol:"info.circle") {
-                            Text(L("默认按 Switch 物理位置映射；单玩家。断开手柄立即清空该设备输入。")).font(.caption).foregroundStyle(.secondary)
+                            Text(L("面键遵循所选设备布局；断开手柄立即清空该设备输入。")).font(.caption).foregroundStyle(.secondary)
                         }
                     }
                 }.padding(2)

@@ -142,5 +142,40 @@ class EngineSyncTests(unittest.TestCase):
                     input=source,text=True,capture_output=True)
                 self.assertEqual(result.returncode,0,result.stderr)
 
+    def metalfx_source(self):
+        assignments='\n'.join(f'        sc.{name} = (NSUInteger)c->base[{kind}][{axis}];'
+            for kind,prefix in [('DLSS_COLOR','colorContentOffset'),('DLSS_DEPTH','depthContentOffset'),('DLSS_MOTION','motionContentOffset'),('DLSS_OUTPUT','outputOffset')]
+            for axis,name in enumerate([prefix+'X',prefix+'Y']))
+        path=self.source/'dm/gfx/nvn/nvn_mtl.m';path.parent.mkdir(parents=True,exist_ok=True)
+        path.write_text("    if (@available(macOS 27.0, iOS 27.0, *)) {   // the rectangles' corners: all at the origin on the game seen, so an older system loses nothing there\n"+assignments+"\n    } else if (c->base[DLSS_COLOR][0] || c->base[DLSS_OUTPUT][1]) {\n        MLOG(\"nonzero origin\");\n    }\n")
+        return path
+
+    @unittest.skipUnless(sys.platform=='darwin','SDK compilation needs Apple clang')
+    def test_metalfx_offsets_compile_on_old_and_new_mac_and_ios_sdks(self):
+        path=self.metalfx_source();original=path.read_text();patch_sdk_compatibility(self.source)
+        guarded=path.read_text();patch_sdk_compatibility(self.source)
+        self.assertEqual(path.read_text(),guarded)
+        self.assertIn('#endif\n    if (c->base[DLSS_COLOR][0]',guarded)
+        for target,macro in [('arm64-apple-macos26.0','__MAC_OS_X_VERSION_MAX_ALLOWED'),('arm64-apple-ios26.0','__IPHONE_OS_VERSION_MAX_ALLOWED')]:
+            for sdk in (260600,270000):
+                with self.subTest(target=target,sdk=sdk):
+                    names=['colorContentOffsetX','colorContentOffsetY','depthContentOffsetX','depthContentOffsetY','motionContentOffsetX','motionContentOffsetY','outputOffsetX','outputOffsetY']
+                    declarations=''.join('@property unsigned long '+name+';\n' for name in names) if sdk>=270000 else ''
+                    prefix=(f'#define {macro} {sdk}\n#define MLOG(...) ((void)0)\n'
+                        'typedef unsigned long NSUInteger; enum {DLSS_COLOR,DLSS_DEPTH,DLSS_MOTION,DLSS_OUTPUT};\n'
+                        'struct C {int base[4][2];};\n@protocol Scaler\n'+declarations+'@end\nvoid run(id<Scaler> sc,struct C *c) {\n')
+                    result=subprocess.run(['xcrun','clang','-target',target,'-x','objective-c','-fsyntax-only','-'],input=prefix+guarded+'}\n',text=True,capture_output=True)
+                    self.assertEqual(result.returncode,0,result.stderr)
+                    if sdk<270000:
+                        broken=subprocess.run(['xcrun','clang','-target',target,'-x','objective-c','-fsyntax-only','-'],input=prefix+original+'}\n',text=True,capture_output=True)
+                        self.assertNotEqual(broken.returncode,0)
+
+    def test_metalfx_interface_drift_preserves_previous_snapshot(self):
+        path=self.metalfx_source();self.commit();sync(self.source,self.target)
+        before=inventory(self.target)
+        path.write_text(path.read_text().replace('sc.outputOffsetY','sc.newOutputOffsetY'));self.commit()
+        with self.assertRaisesRegex(RuntimeError,'MetalFX offset interface changed'):sync(self.source,self.target)
+        self.assertEqual(inventory(self.target),before);verify_bundle(self.target)
+
 
 if __name__=='__main__':unittest.main()

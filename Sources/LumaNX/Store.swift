@@ -52,6 +52,7 @@ final class WorkerOutput: @unchecked Sendable {
     @Published var showingRecovery = false
     @Published var inputGame: Game?
     @Published var globalInput = InputConfig.standard
+    @Published var controllerLayouts = ControllerLayouts()
     @Published var queue: [String] = []
     let privateRoot: URL
     let resources: URL
@@ -127,6 +128,7 @@ final class WorkerOutput: @unchecked Sendable {
         if let data = try? Data(contentsOf:privateRoot.appendingPathComponent("preferences.json")), let p = try? JSONDecoder().decode(Preferences.self,from:data) { preferences = p }
         if let output=preferences.conversionOutput {conversion.outputDirectory=output}
         if let data = try? Data(contentsOf:privateRoot.appendingPathComponent("default-input.json")), let p = try? JSONDecoder().decode(InputConfig.self,from:data) { globalInput = p }
+        controllerLayouts = ControllerLayouts.load(privateRoot.appendingPathComponent("controller-layouts.json"))
         if let i = args.firstIndex(of:"--language"), args.count > i+1, let language = AppLanguage(rawValue:args[i+1]) {
             preferences.language = language.rawValue
         }
@@ -677,6 +679,16 @@ final class WorkerOutput: @unchecked Sendable {
     func input(for game: Game?) -> InputConfig {
         if let game, let d = try? Data(contentsOf:libraryURL.appendingPathComponent("mappings/\(game.id).json")), let config = try? JSONDecoder().decode(InputConfig.self,from:d) { return config }
         return globalInput
+    }
+    func saveControllerLayout(_ layout: ControllerLayout, for key: String) {
+        var updated=controllerLayouts
+        updated.layouts[key] = layout == .reported ? nil : layout.rawValue
+        do {
+            let url=privateRoot.appendingPathComponent("controller-layouts.json")
+            try JSONEncoder().encode(updated).write(to:url,options:.atomic)
+            try FileManager.default.setAttributes([.posixPermissions:0o600],ofItemAtPath:url.path)
+            controllerLayouts=updated
+        } catch { self.error=L("手柄布局保存失败，请检查数据目录权限。") }
     }
     func saveInput(_ config: InputConfig, for game: Game?) {
         guard config.conflicts.isEmpty, let d = try? JSONEncoder().encode(config), let obj = try? JSONSerialization.jsonObject(with:d) else { return }
