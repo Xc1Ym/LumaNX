@@ -2,6 +2,16 @@
 #include "front_mac.m"
 #include <assert.h>
 #include <time.h>
+#import <objc/runtime.h>
+
+// Only replace device discovery, never the production input or slot logic.
+static NSArray<GCController *> *testControllers;
+@interface GCController (LayoutDiscovery)
++ (NSArray<GCController *> *)luma_testControllers;
+@end
+@implementation GCController (LayoutDiscovery)
++ (NSArray<GCController *> *)luma_testControllers { return testControllers ?: @[]; }
+@end
 
 int g_swkbd_min_chars;
 static uint64_t received[DM_PLAYERS];
@@ -107,6 +117,17 @@ int main(void) {
         GCController *snapshot=[GCController controllerWithExtendedGamepad];
         NamedController *c=[NamedController new];
         IdentityPad *pad=[IdentityPad new];pad.identity=c;pad.backing=snapshot.extendedGamepad;c.testPad=pad;
+        NSString *layoutPath=[NSTemporaryDirectory() stringByAppendingPathComponent:NSUUID.UUID.UUIDString];
+        c.testName=@"8BitDo 布局测试";c.testCategory=@"HID";
+        NSString *physicalKey=luma_controller_key(c);
+        assert([physicalKey isEqualToString:@"19:8BitDo 布局测试3:HID"]);
+        NSDictionary *config=@{@"schema":@1,@"layouts":@{physicalKey:@"switchPosition",@"7:Unknown3:HID":@"future-mode"}};
+        NSData *data=[NSJSONSerialization dataWithJSONObject:config options:0 error:NULL];
+        assert([data writeToFile:layoutPath atomically:YES]);
+        setenv("DM_CONTROLLER_LAYOUTS",layoutPath.UTF8String,1);
+        for (NSString *bad in @[@"[]",@"null",@"{}",@"{\"schema\":2,\"layouts\":{}}",@"{\"schema\":1,\"layouts\":[]}",@"broken"]) {
+            assert(luma_parse_controller_layouts([bad dataUsingEncoding:NSUTF8StringEncoding]).count==0);
+        }
         int p=pad_slot_take(&g_slots,(__bridge const void *)c,"snapshot");assert(p==0);g_held[p]=c;
         GCControllerButtonInput *buttons[]={pad.buttonA,pad.buttonB,pad.buttonX,pad.buttonY};
         for (NSString *name in @[@"Nintendo Switch Pro Controller",@"Joy-Con (L/R)",@"Pro Controller",@"Xbox Wireless Controller",@"DualSense Wireless Controller",@"DualShock 4",@"Generic USB Controller"]) {
@@ -122,6 +143,30 @@ int main(void) {
             }
           }
         }
+        // Same model reconnects and different multiplayer slots use the same
+        // exact-identity setting; another identity and a different mode do not.
+        c.testName=@"8BitDo 布局测试";c.testCategory=@"HID";
+        uint64_t physical[]={DM_BTN_B,DM_BTN_A,DM_BTN_Y,DM_BTN_X};
+        for(int i=0;i<4;i++) {
+            [buttons[i] setValue:1];pad_read(pad);assert(received[p]==physical[i]);
+            [buttons[i] setValue:0];pad_read(pad);assert(received[p]==0);
+        }
+        NamedController *other=[NamedController new];other.testName=@"Other pad";other.testCategory=@"HID";
+        IdentityPad *pad2=[IdentityPad new];pad2.identity=other;
+        pad2.backing=[GCController controllerWithExtendedGamepad].extendedGamepad;other.testPad=pad2;
+        int second=pad_slot_take(&g_slots,(__bridge const void *)other,"second");assert(second==1);g_held[second]=other;
+        [pad.buttonA setValue:1];[pad2.buttonA setValue:1];pad_read(pad);pad_read(pad2);
+        assert(received[p]==DM_BTN_B && received[second]==DM_BTN_A);
+        Method discovery=class_getClassMethod(GCController.class,@selector(controllers));
+        Method fixtureDiscovery=class_getClassMethod(GCController.class,@selector(luma_testControllers));
+        method_exchangeImplementations(discovery,fixtureDiscovery);testControllers=@[other];
+        pads_changed(c);assert(received[p]==0 && received[second]==DM_BTN_A);
+        int reconnected=pad_slot_take(&g_slots,(__bridge const void *)c,"reconnected");assert(reconnected==0);g_held[reconnected]=c;
+        pad_read(pad);assert(received[reconnected]==DM_BTN_B);
+        c.testCategory=@"XInput";pad_read(pad);assert(received[reconnected]==DM_BTN_A);
+        c.testName=@"Unknown";c.testCategory=@"HID";pad_read(pad);assert(received[reconnected]==DM_BTN_A);
+        [pad.buttonA setValue:0];[pad2.buttonA setValue:0];pad_read(pad2);
+        [[NSFileManager defaultManager] removeItemAtPath:layoutPath error:NULL];
         [pad.buttonA setValue:1];[pad.buttonB setValue:1];[pad.leftTrigger setValue:1];[pad.rightShoulder setValue:1];
         [pad.leftThumbstick setValueForXAxis:.75 yAxis:-.5];pad_read(pad);
         assert(received[p]==(DM_BTN_A|DM_BTN_B|DM_BTN_ZL|DM_BTN_R));assert(axes[p][0]>0&&axes[p][1]<0);
@@ -138,6 +183,7 @@ int main(void) {
 #if __has_include("motion_apple.h")
         assert(motion_clears[p]>0);
 #endif
+        method_exchangeImplementations(discovery,fixtureDiscovery);
         puts("PASS: native GameController face buttons, combos, axes, focus and disconnect cleanup");
     }
     return 0;

@@ -3514,5 +3514,37 @@
   {
     "source": "选择游戏包，或包含 base/exefs 与 base/romfs 的已解包根目录。更新需要合并后的完整 RomFS；导入后校验版本并准备 Mac 运行文件。",
     "en": "Select game packages or a decrypted root folder containing base/exefs and base/romfs. Updates need complete patched RomFS trees. Imported games are checked before preparing Mac runtime files."
+  },
+  {
+    "source": "按报告字母",
+    "en": "Use reported letters"
+  },
+  {
+    "source": "按 Switch 物理位置",
+    "en": "Use Switch physical positions"
+  },
+  {
+    "source": "设备",
+    "en": "Device"
+  },
+  {
+    "source": "面键布局",
+    "en": "Face button layout"
+  },
+  {
+    "source": "按报告字母保留现有按键；按 Switch 物理位置交换 A/B、X/Y。输入测试立即预览，游戏下次启动生效；旧运行版本需重新准备。",
+    "en": "Reported letters preserve the current buttons; Switch positions swap A/B and X/Y. Preview changes immediately; games apply them on the next launch. Prepare older runtimes again."
+  },
+  {
+    "source": "按设备报告的名称和类别保存；同型号且身份相同的手柄共享设置。不同模式若报告不同身份则分别保存。",
+    "en": "Saved by the reported device name and category. Identical devices share a setting; modes with different reported identities have separate settings."
+  },
+  {
+    "source": "面键遵循所选设备布局；断开手柄立即清空该设备输入。",
+    "en": "Face buttons follow the selected device layout. Disconnecting immediately clears that device’s input."
+  },
+  {
+    "source": "手柄布局保存失败，请检查数据目录权限。",
+    "en": "Could not save the controller layout. Check the data directory permissions."
   }
 ]

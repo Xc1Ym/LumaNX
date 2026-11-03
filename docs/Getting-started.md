@@ -39,6 +39,10 @@ Existing library keys can be reused. **Import conversion keys…** stores a sepa
 
 Tasks support progress, logs, cancellation and retry. Inputs are cloned/copied and verified before processing in a private temporary workspace. A failed or cancelled conversion leaves original files and earlier output intact. Successful outputs pass container-structure and copy-hash checks, then appear in a new folder under your chosen output directory. These checks do not validate game signatures or gameplay. Use **View conversion results** or **Import generated NSP files** from the task. Library import still performs its own metadata and setup checks.
 
+## Controller layouts
+
+In the input editor, expand **Native controllers detected automatically**, select a connected controller and choose **Use reported letters** (the default) or **Use Switch physical positions** (swap A/B and X/Y). This separate setting saves automatically, updates the input preview immediately and applies on the next game launch without the optional keyboard/mouse mapping interface. Prepare older runtimes once to install the new host. Identical reported device identities share a setting; modes reporting different identities are saved separately. See [controller layouts and acceptance limits](Controller-layouts.md).
+
 ## Export an IPA
 
 Choose **Generate IPA…** in game details and save outside the managed library. This builds an **unsigned iPhone / iPad game package** from the imported NSPs; a Mac runtime is not required first. Install the iOS platform and Metal compiler in your selected Xcode, and install XcodeGen with `brew install xcodegen` before exporting.

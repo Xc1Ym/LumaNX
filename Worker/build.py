@@ -455,6 +455,9 @@ def launch(c):
         else: cfg=None
         env=c.env(g['id'],temp); env.update(DM_WINDOW='1',DM_AUDIO='1',DM_LANG=language,DM_ROMFS=str(runtime/'romfs'),DM_SAVE=str(save),DM_TEMP=str(temp),DM_AOC_DIR=str(runtime/'aoc'),DM_FONT_DIR=str(runtime/'font'),DM_MSL_DIR=str(runtime/'shaders'),DM_NVN_SHMAP=str(runtime/'profile/shader_map.tsv'),DM_PSO_USER=str(pso))
         if cfg: env['DM_INPUT_CONFIG']=str(cfg)
+        # Always override inherited state; native controller policy is independent
+        # of the optional keyboard/mouse mapping interface. Missing file = labels.
+        env['DM_CONTROLLER_LAYOUTS']=str(c.private/'controller-layouts.json')
         log=c.private/'logs'/f'game-{g["id"]}.log'
         try: c.run([runtime/'dmhost',runtime/'modules'],log,env,cwd=temp)
         except Failure as error:

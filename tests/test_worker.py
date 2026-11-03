@@ -166,6 +166,21 @@ class WorkerTests(unittest.TestCase):
                 with self.assertRaisesRegex(Failure,'游戏语言代码无效'):self.quiet(build.launch,self.ctx)
                 check.assert_not_called();run.assert_not_called()
 
+    def test_native_layout_path_overrides_inherited_environment_without_input_config(self):
+        from unittest.mock import patch
+        import os
+        self.ctx.save_catalog({'games':[{'id':'g','packages':[]}]});self.ctx.r['gameId']='g'
+        game=self.ctx.game()
+        runtime=self.ctx.library/'games'/game['id']/'current'
+        runtime.mkdir(parents=True,exist_ok=True)
+        atomic(runtime/'manifest.json',{'inputConfig':False})
+        seen=[]
+        def run(args,log=None,env=None,cwd=None,on_line=None):seen.append(env)
+        with patch('toolchain.require_launch_environment'),patch('build.validate_runtime'),patch.object(self.ctx,'run',side_effect=run),patch.dict(os.environ,{'DM_CONTROLLER_LAYOUTS':'untrusted-inherited-path'}):
+            self.quiet(build.launch,self.ctx)
+        self.assertEqual(seen[0]['DM_CONTROLLER_LAYOUTS'],str(self.ctx.private/'controller-layouts.json'))
+        self.assertNotIn('DM_INPUT_CONFIG',seen[0])
+
     def test_launcher_and_worker_accept_the_same_switch_language_codes(self):
         source=(ROOT/'Sources/LumaNX/GameLanguage.swift').read_text()
         codes=set(re.findall(r'\b\w+\s*=\s*"([a-z]{2}(?:-[A-Za-z0-9]+)?)"',source))

@@ -47,6 +47,7 @@ def patch_controller(root):
 
 
 def patch_sdk_compatibility(root):
+    patch_metalfx_compatibility(root)
     # Runtime availability does not make SDK 27 declarations visible to Xcode 26.
     path=root/'dm/ios/Sources/DmGamepad.m'
     text=path.read_text()
@@ -57,6 +58,25 @@ def patch_sdk_compatibility(root):
     if guarded in text: return
     if text.count(old)!=1: raise RuntimeError('Upstream phone motion interface changed: '+str(path))
     path.write_text(text.replace(old,guarded))
+
+
+def patch_metalfx_compatibility(root):
+    path = root/'dm/gfx/nvn/nvn_mtl.m'
+    if not path.exists(): return
+    text = path.read_text()
+    if 'colorContentOffsetX' not in text: return
+    guard = '#if (defined(__MAC_OS_X_VERSION_MAX_ALLOWED) && __MAC_OS_X_VERSION_MAX_ALLOWED >= 270000) || (defined(__IPHONE_OS_VERSION_MAX_ALLOWED) && __IPHONE_OS_VERSION_MAX_ALLOWED >= 270000)'
+    start = '    if (@available(macOS 27.0, iOS 27.0, *)) {   // the rectangles\' corners: all at the origin on the game seen, so an older system loses nothing there'
+    end = '    } else if (c->base[DLSS_COLOR][0]'
+    # Keep the nonzero-origin warning on older SDKs as well as older systems.
+    # Runtime availability alone cannot hide properties absent from SDK 26.
+    if guard+'\n'+start in text: return
+    properties = ('colorContentOffsetX', 'colorContentOffsetY', 'depthContentOffsetX', 'depthContentOffsetY',
+                  'motionContentOffsetX', 'motionContentOffsetY', 'outputOffsetX', 'outputOffsetY')
+    if text.count(start) != 1 or text.count(end) != 1 or any(text.count('sc.'+p) != 1 for p in properties):
+        raise RuntimeError('Upstream MetalFX offset interface changed: '+str(path))
+    text = text.replace(start, guard+'\n'+start).replace(end, '    } else\n#endif\n    if (c->base[DLSS_COLOR][0]')
+    path.write_text(text)
 
 
 def sync(checkout, target):
@@ -75,6 +95,10 @@ def sync(checkout, target):
             if (checkout/rel).is_symlink(): raise RuntimeError('Upstream symlink is not allowed: '+name)
             # Read committed bytes, never a builder's modified working copy.
             data = subprocess.check_output(['git', '-C', checkout, 'show', sha+':'+name])
+            # Upstream's generated dav1d config has an extra blank EOF line.
+            # Normalize only that file so the imported source passes diff checks.
+            if name == 'dm/third_party/dav1d/config/config.h':
+                data = data.rstrip(b'\n')+b'\n'
             dest = stage/rel; dest.parent.mkdir(parents=True, exist_ok=True); dest.write_bytes(data)
             if (checkout/rel).stat().st_mode & 0o111: dest.chmod(0o755)
         patch_controller(stage)
