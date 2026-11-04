@@ -142,40 +142,70 @@ class EngineSyncTests(unittest.TestCase):
                     input=source,text=True,capture_output=True)
                 self.assertEqual(result.returncode,0,result.stderr)
 
-    def metalfx_source(self):
-        assignments='\n'.join(f'        sc.{name} = (NSUInteger)c->base[{kind}][{axis}];'
+    def metalfx_source(self, deferred=False):
+        base='a.base' if deferred else 'c->base'
+        indent='        ' if deferred else '    '
+        assignments='\n'.join(f'{indent}    sc.{name} = (NSUInteger){base}[{kind}][{axis}];'
             for kind,prefix in [('DLSS_COLOR','colorContentOffset'),('DLSS_DEPTH','depthContentOffset'),('DLSS_MOTION','motionContentOffset'),('DLSS_OUTPUT','outputOffset')]
             for axis,name in enumerate([prefix+'X',prefix+'Y']))
         path=self.source/'dm/gfx/nvn/nvn_mtl.m';path.parent.mkdir(parents=True,exist_ok=True)
-        path.write_text("    if (@available(macOS 27.0, iOS 27.0, *)) {   // the rectangles' corners: all at the origin on the game seen, so an older system loses nothing there\n"+assignments+"\n    } else if (c->base[DLSS_COLOR][0] || c->base[DLSS_OUTPUT][1]) {\n        MLOG(\"nonzero origin\");\n    }\n")
+        available='if (@available(macOS 27.0, iOS 27.0, *)) {'
+        warning='if (c->base[DLSS_COLOR][0] || c->base[DLSS_OUTPUT][1]) {\n        MLOG("nonzero origin");\n    }\n'
+        block=indent+available+'   // SDK 27 offsets\n'+assignments+'\n'+indent+'}'
+        if deferred:
+            path.write_text('    '+available+'} else '+warning+
+                            '    const struct C a = *c;\n    void (^encode)(void) = ^{\n'+block+'\n    };\n    encode();\n')
+        else:
+            path.write_text(block+' else '+warning)
         return path
 
     @unittest.skipUnless(sys.platform=='darwin','SDK compilation needs Apple clang')
     def test_metalfx_offsets_compile_on_old_and_new_mac_and_ios_sdks(self):
-        path=self.metalfx_source();original=path.read_text();patch_sdk_compatibility(self.source)
+        self.check_metalfx_compilation(deferred=False)
+        self.check_metalfx_compilation(deferred=True)
+
+    def check_metalfx_compilation(self, deferred):
+        path=self.metalfx_source(deferred);original=path.read_text();patch_sdk_compatibility(self.source)
         guarded=path.read_text();patch_sdk_compatibility(self.source)
         self.assertEqual(path.read_text(),guarded)
         self.assertIn('#endif\n    if (c->base[DLSS_COLOR][0]',guarded)
+        self.assertEqual(guarded.count('MLOG("nonzero origin")'),1)
         for target,macro in [('arm64-apple-macos26.0','__MAC_OS_X_VERSION_MAX_ALLOWED'),('arm64-apple-ios26.0','__IPHONE_OS_VERSION_MAX_ALLOWED')]:
             for sdk in (260600,270000):
-                with self.subTest(target=target,sdk=sdk):
+                with self.subTest(target=target,sdk=sdk,deferred=deferred):
                     names=['colorContentOffsetX','colorContentOffsetY','depthContentOffsetX','depthContentOffsetY','motionContentOffsetX','motionContentOffsetY','outputOffsetX','outputOffsetY']
                     declarations=''.join('@property unsigned long '+name+';\n' for name in names) if sdk>=270000 else ''
                     prefix=(f'#define {macro} {sdk}\n#define MLOG(...) ((void)0)\n'
                         'typedef unsigned long NSUInteger; enum {DLSS_COLOR,DLSS_DEPTH,DLSS_MOTION,DLSS_OUTPUT};\n'
                         'struct C {int base[4][2];};\n@protocol Scaler\n'+declarations+'@end\nvoid run(id<Scaler> sc,struct C *c) {\n')
-                    result=subprocess.run(['xcrun','clang','-target',target,'-x','objective-c','-fsyntax-only','-'],input=prefix+guarded+'}\n',text=True,capture_output=True)
+                    command=['xcrun','clang','-target',target,'-x','objective-c','-fblocks','-fsyntax-only','-']
+                    result=subprocess.run(command,input=prefix+guarded+'}\n',text=True,capture_output=True)
                     self.assertEqual(result.returncode,0,result.stderr)
                     if sdk<270000:
-                        broken=subprocess.run(['xcrun','clang','-target',target,'-x','objective-c','-fsyntax-only','-'],input=prefix+original+'}\n',text=True,capture_output=True)
+                        broken=subprocess.run(command,input=prefix+original+'}\n',text=True,capture_output=True)
                         self.assertNotEqual(broken.returncode,0)
 
+    def test_deferred_metalfx_offsets_survive_sync_and_reapplication(self):
+        self.metalfx_source(deferred=True);self.commit()
+        sync(self.source,self.target)
+        imported=self.target/'dm/gfx/nvn/nvn_mtl.m';before=imported.read_text()
+        self.assertIn('#endif\n    if (c->base[DLSS_COLOR][0]',before)
+        self.assertIn('sc.colorContentOffsetX = (NSUInteger)a.base[DLSS_COLOR][0]',before)
+        patch_sdk_compatibility(self.target)
+        self.assertEqual(imported.read_text(),before)
+        verify_bundle(self.target)
+
     def test_metalfx_interface_drift_preserves_previous_snapshot(self):
-        path=self.metalfx_source();self.commit();sync(self.source,self.target)
-        before=inventory(self.target)
-        path.write_text(path.read_text().replace('sc.outputOffsetY','sc.newOutputOffsetY'));self.commit()
-        with self.assertRaisesRegex(RuntimeError,'MetalFX offset interface changed'):sync(self.source,self.target)
-        self.assertEqual(inventory(self.target),before);verify_bundle(self.target)
+        for deferred in (False,True):
+            with self.subTest(deferred=deferred):
+                path=self.metalfx_source(deferred);self.commit();sync(self.source,self.target)
+                before=inventory(self.target);original=path.read_text()
+                for changed in (original.replace('sc.outputOffsetY','sc.newOutputOffsetY'),
+                                original.replace('[DLSS_OUTPUT][1]','[DLSS_OUTPUT][0]'),
+                                original+original):
+                    path.write_text(changed);self.commit()
+                    with self.assertRaisesRegex(RuntimeError,'MetalFX offset interface changed'):sync(self.source,self.target)
+                    self.assertEqual(inventory(self.target),before);verify_bundle(self.target)
 
 
 if __name__=='__main__':unittest.main()

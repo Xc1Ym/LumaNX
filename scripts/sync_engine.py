@@ -4,6 +4,7 @@ import argparse
 import hashlib
 import json
 from pathlib import Path
+import re
 import shutil
 import subprocess
 import sys
@@ -66,16 +67,43 @@ def patch_metalfx_compatibility(root):
     text = path.read_text()
     if 'colorContentOffsetX' not in text: return
     guard = '#if (defined(__MAC_OS_X_VERSION_MAX_ALLOWED) && __MAC_OS_X_VERSION_MAX_ALLOWED >= 270000) || (defined(__IPHONE_OS_VERSION_MAX_ALLOWED) && __IPHONE_OS_VERSION_MAX_ALLOWED >= 270000)'
-    start = '    if (@available(macOS 27.0, iOS 27.0, *)) {   // the rectangles\' corners: all at the origin on the game seen, so an older system loses nothing there'
-    end = '    } else if (c->base[DLSS_COLOR][0]'
+    available = 'if (@available(macOS 27.0, iOS 27.0, *)) {'
+    warning = 'if (c->base[DLSS_COLOR][0]'
     # Keep the nonzero-origin warning on older SDKs as well as older systems.
     # Runtime availability alone cannot hide properties absent from SDK 26.
-    if guard+'\n'+start in text: return
     properties = ('colorContentOffsetX', 'colorContentOffsetY', 'depthContentOffsetX', 'depthContentOffsetY',
                   'motionContentOffsetX', 'motionContentOffsetY', 'outputOffsetX', 'outputOffsetY')
-    if text.count(start) != 1 or text.count(end) != 1 or any(text.count('sc.'+p) != 1 for p in properties):
+    # The offsets may be assigned immediately or inside rec_cb_block from a
+    # captured value. Match the complete assignment block, not its comment or
+    # a closing brace elsewhere in the renderer.
+    blocks = list(re.finditer(r'(?m)^(?P<indent> +)'+re.escape(available)+
+                             r'[^\n]*\n(?P<body>(?:[^\n]*\n)*?)(?P=indent)\}', text))
+    blocks = [block for block in blocks if 'sc.colorContentOffsetX' in block['body']]
+    if len(blocks) != 1 or any(text.count('sc.'+p) != 1 for p in properties):
         raise RuntimeError('Upstream MetalFX offset interface changed: '+str(path))
-    text = text.replace(start, guard+'\n'+start).replace(end, '    } else\n#endif\n    if (c->base[DLSS_COLOR][0]')
+    block = blocks[0]
+    assignments = ''.join(block['body'].split())
+    expected = [''.join(f'sc.{prop}=(NSUInteger){base}[{kind}][{axis}];'
+                       for (kind, prefix) in (('DLSS_COLOR', 'colorContentOffset'), ('DLSS_DEPTH', 'depthContentOffset'),
+                                              ('DLSS_MOTION', 'motionContentOffset'), ('DLSS_OUTPUT', 'outputOffset'))
+                       for axis, prop in enumerate((prefix+'X', prefix+'Y')))
+                for base in ('c->base', 'a.base')]
+    tail = text[block.end():]
+    legacy = tail.startswith(' else '+warning)
+    deferred_warning = '    '+available+'} else '+warning
+    if assignments in expected and text[:block.start()].endswith(guard+'\n') and (
+            tail.startswith(' else\n#endif\n'+block['indent']+warning) or tail.startswith('\n#endif\n')):
+        return
+    if assignments not in expected or (not legacy and text.count(deferred_warning) != 1):
+        raise RuntimeError('Upstream MetalFX offset interface changed: '+str(path))
+    if legacy:
+        tail = ' else\n#endif\n'+block['indent']+tail[len(' else '):]
+    else:
+        tail = '\n#endif'+tail
+    text = text[:block.start()]+guard+'\n'+block[0]+tail
+    if not legacy:
+        # An SDK 26 build cannot set offsets even on OS 27, so keep warning there.
+        text = text.replace(deferred_warning, guard+'\n    '+available+'} else\n#endif\n    '+warning)
     path.write_text(text)
 
 
