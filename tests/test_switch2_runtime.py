@@ -4,14 +4,16 @@ from pathlib import Path
 import struct
 import sys
 import unittest
-import zbic
+try: import zbic
+except ImportError: zbic=None
 
 ROOT=Path(__file__).resolve().parents[1]
 sys.path.insert(0,str(ROOT/'Worker'))
 from derived import module
-nso=module(ROOT/'Engine/nxnative/dm/tools/nso.py','lumanx_zbic_nso')
+nso=module(ROOT/'Engine/nxnative/dm/tools/nso.py','lumanx_zbic_nso') if zbic is not None else None
 
 
+@unittest.skipUnless(zbic is not None,'Install requirements-runtime.txt to check ZBIC decoding')
 class Switch2CompressionTests(unittest.TestCase):
     def fixture(self):
         segments=(bytes.fromhex('1f2003d5')*64,b'synthetic read-only data'*32,b'\x01\x02'*128)

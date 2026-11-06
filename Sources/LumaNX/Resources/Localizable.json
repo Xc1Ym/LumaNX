@@ -3484,8 +3484,8 @@
     "en": "Copy decrypted game to library"
   },
   {
-    "source": "已解包游戏目前仅支持 Mac 运行，尚未开放 IPA 导出。",
-    "en": "Decrypted game folders currently support Mac only. IPA export is not available yet."
+    "source": "NUP 与已解包游戏目前仅支持 Mac 运行，尚未开放 IPA 导出。",
+    "en": "NUP files and decrypted game folders currently support Mac only. IPA export is not available yet."
   },
   {
     "source": "添加游戏包或 Switch 2 已解包目录（⌘O）；已解包目录无需密钥。",
@@ -3568,8 +3568,8 @@
     "en": "This engine does not support NUP. Update LumaNX."
   },
   {
-    "source": "NUP 文件无效或内容校验失败：",
-    "en": "Invalid NUP or failed content verification: "
+    "source": "NUP 文件无效或内容校验失败：{0}",
+    "en": "Invalid NUP or failed content verification: {0}"
   },
   {
     "source": "校验 NUP 游戏容器",
@@ -3602,5 +3602,17 @@
   {
     "source": "仅添加 NUP 或已解包游戏，跳过密钥",
     "en": "Add NUP or decrypted games only; skip keys"
+  },
+  {
+    "source": "NUP 更新包的 Title ID 与本体不一致。",
+    "en": "The NUP update title ID does not match the base game."
+  },
+  {
+    "source": "NUP 控制数据超过大小限制。",
+    "en": "NUP control data exceeds the size limit."
+  },
+  {
+    "source": "已解包游戏目前仅支持 Mac 运行，尚未开放 IPA 导出。",
+    "en": "Decrypted game folders currently support Mac only. IPA export is not available yet."
   }
 ]

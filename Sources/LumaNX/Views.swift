@@ -244,7 +244,7 @@ struct GameDetail: View {
                 }
                 Button {store.generateIPA(game)} label:{GameToolLabel(title:"生成 IPA…",symbol:"iphone.and.arrow.forward",accessory:"chevron.right")}
                     .disabled(!game.canExportIPA || !game.buildable || store.executionBusy || !store.queue.isEmpty)
-                    .help(game.canExportIPA ? L("导出 iPhone / iPad 未签名包；需 Xcode iOS 平台及 XcodeGen。") : L("已解包游戏目前仅支持 Mac 运行，尚未开放 IPA 导出。"))
+                    .help(game.canExportIPA ? L("导出 iPhone / iPad 未签名包；需 Xcode iOS 平台及 XcodeGen。") : L("NUP 与已解包游戏目前仅支持 Mac 运行，尚未开放 IPA 导出。"))
                 toolDivider
                 if game.id=="01007EF00011E000" {
                     Button {store.migrate(game)} label:{GameToolLabel(title:"迁移已有旷野之息构建…",symbol:"arrow.down.doc",accessory:"chevron.right")}

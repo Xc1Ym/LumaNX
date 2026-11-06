@@ -35,7 +35,7 @@ def verify_icons():
 
 def verify_source(path):
     from source_archive import EXCLUDED,SOURCE_DIRS,SOURCE_FILES,SOURCE_ARTWORK
-    banned = {'.keys', '.nsp', '.xci', '.nsz', '.xcz','.nup', '.ipa', '.metallib', '.pyc'}
+    banned = {'.keys', '.nsp', '.xci', '.nsz', '.xcz', '.nup', '.ipa', '.metallib', '.pyc'}
     with zipfile.ZipFile(path) as archive:
         assert archive.testzip() is None
         names = archive.namelist()

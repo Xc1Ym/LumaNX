@@ -174,7 +174,7 @@ def container_runner(c, g):
 
 def prepare(c,g,target='macos'):
     if g.get('sourceKind') in ('dump','nup') and target!='macos':
-        raise Failure('已解包游戏目前仅支持 Mac 运行，尚未开放 IPA 导出。')
+        raise Failure('NUP 与已解包游戏目前仅支持 Mac 运行，尚未开放 IPA 导出。')
     from engine import inspect_source
     info=inspect_source(c)
     dynamic=info.get('derivedProfiles',False) and getattr(c,'r',{}).get('operation')!='migrate'

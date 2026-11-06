@@ -215,6 +215,17 @@ class IncrementalBuildTests(unittest.TestCase):
         self.build()
         self.assertEqual(self.delta(lambda:(self.source/'dm/tools/nx_extract/Program.cs').write_text('reader revision 2')),['unpack'])
 
+    def test_reader_changes_do_not_invalidate_nup_or_dump_extraction(self):
+        def keys(source):
+            game=self.c.game()|({'sourceKind':source} if source else {})
+            graph=incremental.Graph(self.source,self.root/'workspace',game,self.info(),{},'macos')
+            return [graph.key(name,{}) for name in ('解包与合并 v1114112','处理 DLC')]
+        before={kind:keys(kind) for kind in ('nup','dump','')}
+        (self.source/'dm/tools/nx_extract/Program.cs').write_text('reader revision 2')
+        self.tool_versions.update(readerLibrary='changed library',readerSDK='changed SDK')
+        self.assertEqual(keys('nup'),before['nup']);self.assertEqual(keys('dump'),before['dump'])
+        self.assertNotEqual(keys(''),before[''])
+
     def test_other_game_profile_change_does_not_rebuild_this_game(self):
         self.build()
         path=self.source/'dm/games/01007EF00011E000/game.tsv'

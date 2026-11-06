@@ -574,7 +574,7 @@ final class WorkerOutput: @unchecked Sendable {
         selection = "tasks"; executionTask = worker("migrate",extra:["gameId":game.id,"path":url.path])
     }
     func generateIPA(_ game: Game, destination: URL? = nil) {
-        guard game.canExportIPA else { error = "已解包游戏目前仅支持 Mac 运行，尚未开放 IPA 导出。"; return }
+        guard game.canExportIPA else { error = "NUP 与已解包游戏目前仅支持 Mac 运行，尚未开放 IPA 导出。"; return }
         guard !executionBusy, queue.isEmpty else { error = "构建与游戏运行互斥，请等待当前任务结束。"; return }
         guard importPrerequisitesReady() else { return }
         guard game.buildable else { error = (game.missing ?? []).joined(separator:"\n"); return }

@@ -218,9 +218,13 @@ class Graph:
         if kind=='unpack':
             version=int(name.rsplit('v',1)[1]);packages=self.packages(('base','update'),version)
             if self.game.get('sourceKind')=='dump' and version: packages=[p for p in packages if p[1]=='update']
-            base.update(packages=packages,reader=self.group_keys['reader'],library=t.get('readerLibrary'),sdk=t.get('readerSDK'))
+            base.update(packages=packages)
+            if self.game.get('sourceKind') not in ('nup','dump'):
+                base.update(reader=self.group_keys['reader'],library=t.get('readerLibrary'),sdk=t.get('readerSDK'))
         elif kind=='dlc':
-            base.update(packages=self.packages(('dlc',)),reader=self.group_keys['reader'],library=t.get('readerLibrary'),sdk=t.get('readerSDK'))
+            base.update(packages=self.packages(('dlc',)))
+            if self.game.get('sourceKind') not in ('nup','dump'):
+                base.update(reader=self.group_keys['reader'],library=t.get('readerLibrary'),sdk=t.get('readerSDK'))
         elif kind=='profile':
             base.update(inputs=self.artifacts(saved,{'unpack'}),profile=self.registered_rows,
                 tables=self.group_keys['profile'],tools=self.group_keys['rewrite'],strategy=self.strategy)

@@ -46,6 +46,9 @@ import XCTest
         XCTAssertEqual(Localization.translate("无法启动本地组件："+path,language:"en"),"Unable to start a local component: "+path)
         let raw="[RED] Metal compiler error at /Volumes/中文 游戏/a.metal:17"
         XCTAssertEqual(Localization.translate(raw,language:"en"),raw)
+        let detail="game.nup: invalid payload at /Volumes/中文 游戏/one"
+        XCTAssertEqual(Localization.translate("NUP 文件无效或内容校验失败："+detail,language:"en"),"Invalid NUP or failed content verification: "+detail)
+        XCTAssertEqual(Localization.translate("NUP 与已解包游戏目前仅支持 Mac 运行，尚未开放 IPA 导出。",language:"en"),"NUP files and decrypted game folders currently support Mac only. IPA export is not available yet.")
     }
     func testLanguageSettingPersistsAndLegacyPreferencesStillLoad() throws {
         let previous=Localization.preference;defer {Localization.preference=previous}

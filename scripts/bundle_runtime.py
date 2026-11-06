@@ -148,7 +148,6 @@ def build(out):
     run([out/'python/bin/python3', '-B', '-I', '-c', 'import capstone,lz4.block,fontTools,zbic,ctypes,zlib,hashlib; from compression import zstd; assert zbic.decompress(zbic.compress(b"LumaNX"))==b"LumaNX"; assert zstd.decompress(zstd.compress(b"NUP"))==b"NUP"; print("Portable Python dependencies OK")'], env=env)
     run([out/'bin/dotnet', '--list-runtimes'], env=env)
     licenses = out/'licenses'
-    licenses.mkdir()
     retain_zbic_sources(out)
     for src, name in [(prefixes['python@3.14']/'LICENSE', 'Python-LICENSE.txt'),
                       (dotnet/'LICENSE.txt', 'dotnet-LICENSE.txt'), (dotnet/'ThirdPartyNotices.txt', 'dotnet-ThirdPartyNotices.txt'),
