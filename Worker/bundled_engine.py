@@ -4,7 +4,7 @@ import json
 from pathlib import Path
 import re
 
-PRIVATE_SUFFIXES = {'.nsp', '.xci', '.nsz', '.xcz', '.nca', '.nso', '.nro', '.tik', '.cert', '.sav', '.keys', '.ipa', '.metallib', '.pyc', '.jpg', '.jpeg', '.png', '.webp'}
+PRIVATE_SUFFIXES = {'.nsp', '.xci', '.nsz', '.xcz', '.nup', '.nca', '.nso', '.nro', '.tik', '.cert', '.sav', '.keys', '.ipa', '.metallib', '.pyc', '.jpg', '.jpeg', '.png', '.webp'}
 PRIVATE_NAMES = {'prod.keys', 'keys.txt', 'catalog.json', 'preferences.json', 'control.nacp', 'romfs_manifest.tsv', 'dmhost'}
 PRIVATE_DIRS = {'.git', '__pycache__', 'gen', 'obj', 'bin', 'romfs', 'exefs', 'saves', 'save', 'backups', 'cache', 'pso_user'}
 

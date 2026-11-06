@@ -13,9 +13,29 @@ import re
 import shutil
 import subprocess
 import tempfile
+import tarfile
 from product import ROOT
 from runtime_audit import SYSTEM_PATHS, rpaths, verify_portable_runtime
 from runtime_size import compact_runtime
+
+ZBIC_VERSION='1.0.1.post1'
+ZBIC_SOURCE='https://files.pythonhosted.org/packages/51/34/a108004438db175641f13b9d9de8b6b57c96911c582e8f39fc57b277f9d8/zbic-1.0.1.post1.tar.gz'
+ZBIC_SHA256='a798c24aea58f81a0b4bb0226f0f383b7e7f07a9a0150732cb45dc65ac541ff3'
+
+
+def retain_zbic_sources(out):
+    from bundle_converter import fetch
+    archive=ROOT/'work/runtime-downloads'/f'zbic-{ZBIC_VERSION}.tar.gz'
+    archive.parent.mkdir(parents=True,exist_ok=True)
+    fetch(ZBIC_SOURCE,archive,ZBIC_SHA256)
+    (out/'sources').mkdir(parents=True,exist_ok=True)
+    shutil.copy2(archive,out/'sources'/archive.name)
+    (out/'licenses').mkdir(exist_ok=True)
+    with tarfile.open(archive) as source:
+        license=source.extractfile(f'zbic-{ZBIC_VERSION}/LICENSE')
+        if license is None: raise RuntimeError('ZBIC source license is missing')
+        (out/'licenses/zbic-LICENSE.txt').write_bytes(license.read())
+    (out/'sources/zbic.json').write_text(json.dumps(dict(version=ZBIC_VERSION,url=ZBIC_SOURCE,sha256=ZBIC_SHA256),indent=2)+'\n')
 
 
 def run(args, **kw):
@@ -65,7 +85,7 @@ def build(out):
     site = out/'python/lib/python3.14/site-packages'
     site.mkdir(parents=True, exist_ok=True)
     for p in installed.iterdir():
-        if p.name.startswith(('capstone', 'lz4', 'fontTools', 'fonttools-')):
+        if p.name.startswith(('capstone', 'lz4', 'fontTools', 'fonttools-', 'zbic')):
             cp(p, site/p.name)
     (out/'python/bin/python3').unlink(missing_ok=True)
     (out/'python/bin/python3').symlink_to('python3.14')
@@ -125,10 +145,10 @@ def build(out):
             p.unlink()
     # Resources/Python.app is required by the framework launcher.
     env = dict(os.environ, DOTNET_ROOT=str(out/'dotnet'), PYTHONNOUSERSITE='1', PYTHONDONTWRITEBYTECODE='1')
-    run([out/'python/bin/python3', '-B', '-I', '-c', 'import capstone,lz4.block,fontTools,ctypes,zlib,hashlib; print("Portable Python dependencies OK")'], env=env)
+    run([out/'python/bin/python3', '-B', '-I', '-c', 'import capstone,lz4.block,fontTools,zbic,ctypes,zlib,hashlib; from compression import zstd; assert zbic.decompress(zbic.compress(b"LumaNX"))==b"LumaNX"; assert zstd.decompress(zstd.compress(b"NUP"))==b"NUP"; print("Portable Python dependencies OK")'], env=env)
     run([out/'bin/dotnet', '--list-runtimes'], env=env)
     licenses = out/'licenses'
-    licenses.mkdir()
+    retain_zbic_sources(out)
     for src, name in [(prefixes['python@3.14']/'LICENSE', 'Python-LICENSE.txt'),
                       (dotnet/'LICENSE.txt', 'dotnet-LICENSE.txt'), (dotnet/'ThirdPartyNotices.txt', 'dotnet-ThirdPartyNotices.txt'),
                       (prefixes['spirv-cross']/'LICENSE', 'SPIRV-Cross-LICENSE.txt'),
@@ -141,7 +161,8 @@ def build(out):
             if p.is_file() and any(x in p.name.upper() for x in ('LICENSE', 'COPYING', 'NOTICE')):
                 shutil.copy2(p, licenses/(name+'-'+p.name))
     versions = json.loads(output([out/'python/bin/python3', '-B', '-I', '-c',
-        'import json,sys,importlib.metadata as m; print(json.dumps(dict(python=sys.version.split()[0], **{p:m.version(p) for p in ["capstone","lz4","fonttools"]})))']))
+        'import json,sys,importlib.metadata as m; print(json.dumps(dict(python=sys.version.split()[0], **{p:m.version(p) for p in ["capstone","lz4","fonttools","zbic"]})))']))
+    if versions['zbic']!=ZBIC_VERSION: raise RuntimeError('ZBIC version differs from its bundled source')
     versions.update(dotnet=version.name, spirvCross=output([brew, 'list', '--versions', 'spirv-cross']), zstd=output([brew, 'list', '--versions', 'zstd']))
     (out/'versions.json').write_text(json.dumps(versions, indent=2))
     print('Portable native runtime files:',verify_portable_runtime(out))

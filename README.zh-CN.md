@@ -13,7 +13,7 @@
 
 璃游 LumaNX 是面向 Apple Silicon Mac 的 **[nxnative](https://github.com/seedds/nxnative) 第三方图形界面**。导入游戏文件，准备 Mac 运行版本，从游戏库启动，或导出未签名的 iPhone / iPad IPA。nxnative 提供原生执行与 Metal 图形能力，璃游用 SwiftUI 将这些操作集中到一个工作空间。
 
-**现已支持内置 nxnative 快照中已适配的 Switch 2 游戏，通过已解包目录导入并在 Mac 上运行。** 游戏及版本兼容范围以引擎配置为准，准备流程按阶段增量更新。
+**现已支持内置 nxnative 快照中已适配的 Switch 2 游戏，通过免密钥的 NUP 或已解包目录导入并在 Mac 上运行。** 游戏及版本兼容范围以引擎配置为准，准备流程按阶段增量更新。
 
 <img src="docs/screenshots/library-zh.jpg" width="1000" alt="璃游 0.2.19 浅色外观游戏库">
 
@@ -38,7 +38,7 @@ Switch Pro、Xbox、PlayStation 手柄通过 Apple GameController 框架接入�
 
 1. 从 [Releases](https://github.com/Xc1Ym/LumaNX/releases/latest) 下载 ARM64 DMG，核对发布说明中的 SHA-256，将 **LumaNX.app** 拖入“应用程序”。当前安装包采用 ad-hoc 签名，尚未公证。
 2. 打开璃游，按首次设置向导检查环境，并**准备引擎工具**。
-3. 选择游戏库，添加有权使用的游戏本体、更新与 DLC。游戏包需要自己的 `prod.keys`；Switch 2 已解包目录无需密钥，可在向导中跳过密钥步骤。
+3. 选择游戏库，添加有权使用的游戏本体、更新与 DLC。游戏包需要自己的 `prod.keys`；NUP 与 Switch 2 已解包目录无需密钥，可在向导中跳过密钥步骤。
 4. 准备完成后点击**启动游戏**；移动设备请选择游戏详情中的**生成 IPA…**。
 
 IPA 导出还需 Xcode 的 **iOS 平台**与 **XcodeGen**（`brew install xcodegen`）。导出后使用自己的安装工具签名，再安装到设备。
@@ -47,7 +47,7 @@ IPA 导出还需 Xcode 的 **iOS 平台**与 **XcodeGen**（`brew install xcodeg
 
 ### Switch 2 已解包游戏（Mac，实验性）
 
-点击“添加游戏”，选择含有 `base/exefs` 与 `base/romfs` 的根目录。璃游校验程序标识和模块构建 ID，将目录复制到游戏库，再使用内置 nxnative 准备并启动游戏，无需 `prod.keys`。仅接受 nxnative 已适配的游戏及其指定版本；当前上游有《咚奇刚 蕉力全开》（`040074A01BF12000`，更新 `458752`）的 Mac 开场区域测试记录，不代表所有 Switch 2 游戏或完整流程可玩。
+点击“添加游戏”，选择 `.nup` 文件（也可扫描含 NUP 的文件夹），或选择含有 `base/exefs` 与 `base/romfs` 的根目录。璃游校验程序标识和模块构建 ID，将目录复制到游戏库，再使用内置 nxnative 准备并启动游戏，无需 `prod.keys`。仅接受 nxnative 已适配的游戏及其指定版本；当前上游有《咚奇刚 蕉力全开》（`040074A01BF12000`，更新 `458752`）的 Mac 开场区域测试记录，不代表所有 Switch 2 游戏或完整流程可玩。
 
 ```text
 DonkeyKongBananza/
@@ -58,7 +58,9 @@ DonkeyKongBananza/
   dlc/040074a01bf13001/0/romfs/       可选 DLC
 ```
 
-更新不会与本体目录再次叠加；游戏配置要求的版本缺失或构建 ID 不符时会阻止准备。同一游戏的游戏包与已解包目录不能混用。目录导入复用游戏库的缓存、存档和运行版本回滚；目前仅开放 Mac 运行，禁用 IPA 导出。LumaNX 的自动化验证使用合成文件，真实游戏仍需实测。上游的[目录格式](https://github.com/seedds/nxnative#switch-2-games)和[游戏测试记录](https://github.com/seedds/nxnative/blob/main/dm/games/040074A01BF12000/README.md)可供对照。
+NUP 导入会校验容器与每个文件的哈希，本体、更新和 DLC 共用一份托管副本；容器带控制数据时读取游戏名称、版本与封面。资源及 DLC 直接打包为镜像。按上游规则支持空本体占位或无本体的完整更新：无本体记录时更新必须标记 `standalone_update`，并包含完整代码及资源。仍须满足配置要求的版本，不会伪造 v0。NUP 与目录导入均要求已登记的游戏配置，不自动生成临时配置。
+
+更新不会与本体目录再次叠加；游戏配置要求的版本缺失或构建 ID 不符时会阻止准备。同一游戏的 NUP、游戏包与已解包目录不能混用。目录导入复用游戏库的缓存、存档和运行版本回滚；目前仅开放 Mac 运行，禁用 IPA 导出。LumaNX 的自动化验证使用合成文件，真实游戏仍需实测。上游的[目录格式](https://github.com/seedds/nxnative#switch-2-games)和[游戏测试记录](https://github.com/seedds/nxnative/blob/main/dm/games/040074A01BF12000/README.md)可供对照。
 
 ## 界面预览
 

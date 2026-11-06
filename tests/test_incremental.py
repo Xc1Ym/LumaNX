@@ -200,20 +200,31 @@ class IncrementalBuildTests(unittest.TestCase):
             self.packages[1].update(size=p.stat().st_size,sha256=digest(p));self.save_game()
         self.assertEqual(self.delta(change),['unpack','shaders'])
 
-    def test_dlc_addition_only_extracts_dlc(self):
+    def test_dlc_addition_refreshes_shader_consumers_and_keeps_code_and_host(self):
         self.build()
         def change():
             p=self.c.library/'dlc.nsp';p.write_text('synthetic DLC')
             self.packages.append(dict(type='dlc',version=0,titleId='0100000000011001',baseId=TITLE,
                 path=p.name,size=p.stat().st_size,sha256=digest(p),builds={}))
             self.save_game()
-        self.assertEqual(self.delta(change),['dlc'])
+        self.assertEqual(self.delta(change),['dlc','shaders'])
         runtime=self.c.library/'games'/TITLE/'current'
         self.assertEqual((runtime/'aoc/1/data').read_text(),'synthetic DLC')
 
     def test_reader_source_change_checks_extraction_but_keeps_identical_outputs(self):
         self.build()
         self.assertEqual(self.delta(lambda:(self.source/'dm/tools/nx_extract/Program.cs').write_text('reader revision 2')),['unpack'])
+
+    def test_reader_changes_do_not_invalidate_nup_or_dump_extraction(self):
+        def keys(source):
+            game=self.c.game()|({'sourceKind':source} if source else {})
+            graph=incremental.Graph(self.source,self.root/'workspace',game,self.info(),{},'macos')
+            return [graph.key(name,{}) for name in ('解包与合并 v1114112','处理 DLC')]
+        before={kind:keys(kind) for kind in ('nup','dump','')}
+        (self.source/'dm/tools/nx_extract/Program.cs').write_text('reader revision 2')
+        self.tool_versions.update(readerLibrary='changed library',readerSDK='changed SDK')
+        self.assertEqual(keys('nup'),before['nup']);self.assertEqual(keys('dump'),before['dump'])
+        self.assertNotEqual(keys(''),before[''])
 
     def test_other_game_profile_change_does_not_rebuild_this_game(self):
         self.build()

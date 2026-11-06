@@ -2,6 +2,7 @@
 from __future__ import annotations
 import ast
 import importlib.util
+from inspect import signature
 import re
 import sys
 from pathlib import Path
@@ -26,7 +27,7 @@ def supported(engine):
 
 
 def plan(game, profile, enabled=False):
-    if game.get('sourceKind')=='dump': enabled=False
+    if game.get('sourceKind') in ('dump','nup'): enabled=False
     packages=[p for p in game['packages'] if p['type'] in ('base','update')]
     selected=max(packages,key=lambda p:p['version'],default=None) if enabled else None
     version=f"v{selected['version']}" if selected else profile['package']
@@ -53,13 +54,24 @@ def module(path, name):
     return result
 
 
+def romfs_source(extraction):
+    extraction=Path(extraction)
+    image=extraction/'RomFS.img'
+    return image if image.is_file() else extraction/'RomFS'
+
+
+def dlc_sources(aoc):
+    aoc=Path(aoc)
+    return sorted(aoc.glob('*.img'))+[p for p in sorted(aoc.iterdir()) if p.is_dir()] if aoc.is_dir() else []
+
+
 def detect_sources(up,repo,selected,gp):
     path=repo/'dm/games/profile_guess.py'
     if not path.is_file(): return {}   # Older external engines predate source detection.
     tools=str(repo/'dm/tools')
     if tools not in sys.path: sys.path.insert(0,tools)
     up.pg=module(path,'lumanx_profile_guess')
-    return up.pg.build_sources(selected/'ExeFS',selected/'RomFS',gp.words('modules'))
+    return up.pg.build_sources(selected/'ExeFS',romfs_source(selected),gp.words('modules'))
 
 
 def oodle_decoder(up,repo,root,env,gp,patched,sources):
@@ -80,7 +92,7 @@ def prepare_profile(c, st, up, registered, root, repo, env, selected, version):
     gp=type(registered)(folder)
     env.update(DM_GAMES_DIR=str(folder.parent),DM_GAMES_FIRST='1')
     up.provisional_prep(sys.executable,repo,env,root/'logs',gp)
-    sources=up.pg.build_sources(selected/'ExeFS',selected/'RomFS',gp.words('modules'))
+    sources=up.pg.build_sources(selected/'ExeFS',romfs_source(selected),gp.words('modules'))
     changes={'graphics':(sources['graphics'][0],'Detected from the selected game build')}
     for flag,key in (('shader_glslc_capture','glslc_capture'),('shader_vk_capture','vk_capture'),
                      ('shader_gl_capture','gl_capture'),('shader_ue_decode','ue_decode')):
@@ -113,7 +125,7 @@ def shaders(c,st,up,repo,root,env,gp,selected,patched,dirs,sources,target):
         capture=selected/(api+'_capture')
         st.run('采集运行时着色器',[capture],lambda:up.capture_shaders(repo,selected,patched,root,env,logs,gp,api))
     if graphics in ('vulkan','gl'):
-        roots=[selected/'RomFS']+([selected/'ExeFS/main'] if graphics=='gl' else [])+([capture] if capture else [])
+        roots=[romfs_source(selected)]+([selected/'ExeFS/main'] if graphics=='gl' else [])+([capture] if capture else [])+dlc_sources(root/'aoc')
         paths=[sh/api]+([sh/'ios'/api] if target=='ios' else [])
         def layer():
             getattr(up,'build_'+api+'_shaders')(sys.executable,repo,roots,sh,env,logs,gp,reuse=False,mac=target=='macos')
@@ -123,9 +135,10 @@ def shaders(c,st,up,repo,root,env,gp,selected,patched,dirs,sources,target):
         st.run('转换并编译 Metal 着色器',paths,layer,milestone='shaders')
     else:
         oodle=oodle_decoder(up,repo,root,env,gp,patched,sources)
+        addons={'dlc_roms':dlc_sources(root/'aoc')} if 'dlc_roms' in signature(up.split_shaders).parameters else {}
         st.run('提取并核对着色器',[sh/'pkg',*[gp.table(t) for t in TABLES]],lambda:up.split_shaders(
-            sys.executable,repo,[d/'RomFS' for d in dirs.values()],[d/'ExeFS/main' for d in dirs.values()],
-            sh/'pkg',env,logs,gp,provisional=True,oodle=oodle),milestone='extract')
+            sys.executable,repo,[romfs_source(d) for d in dirs.values()],[d/'ExeFS/main' for d in dirs.values()],
+            sh/'pkg',env,logs,gp,provisional=True,oodle=oodle,**addons),milestone='extract')
         outputs=[sh/'cache',gp.table('c1_full.tsv'),gp.table('cb_extent.tsv')]+([sh/'ios'] if target=='ios' else [])
         def nvn():
             up.build_shaders(sys.executable,repo,sh,repo/'dm/gfx/tools/dmsh_xlate_bin/dmsh_xlate',env,logs,gp,mac=target=='macos')

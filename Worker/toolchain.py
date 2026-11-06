@@ -88,7 +88,7 @@ def inspect_environment(c):
     versions = {}
     try:
         versions = read(runtime/'versions.json')
-        manifest_ok = isinstance(versions, dict) and all(isinstance(versions.get(k),str) and versions[k] for k in ('python','capstone','lz4','fonttools','dotnet','spirvCross','zstd'))
+        manifest_ok = isinstance(versions, dict) and all(isinstance(versions.get(k),str) and versions[k] for k in ('python','capstone','lz4','fonttools','zbic','dotnet','spirvCross','zstd'))
     except (OSError, ValueError):
         manifest_ok = False
     add('内置组件清单', manifest_ok, '验证随应用提供的组件版本清单', repair, 'reinstall', 'bundled', location=runtime/'versions.json')
@@ -105,14 +105,15 @@ def inspect_environment(c):
     add('内置 Python', ok, f'Python {data.get("version", "")} · 应用内置' if ok else '内置 Python 无法运行或版本不匹配', repair, 'reinstall', 'bundled', both, output, py)
     python_ok = ok
     ok, output = probe(c, [py, '-B', '-I', '-c',
-        'import capstone,lz4.block,fontTools,json,importlib.metadata as m; '
+        'import capstone,lz4.block,fontTools,zbic,json,importlib.metadata as m; from compression import zstd; '
         'from fontTools.ttLib import TTFont; '
         'assert next(capstone.Cs(capstone.CS_ARCH_ARM64,capstone.CS_MODE_ARM).disasm(bytes.fromhex("1f2003d5"),0)).mnemonic=="nop"; '
         'assert lz4.block.decompress(lz4.block.compress(b"LumaNX"))==b"LumaNX"; TTFont(); '
-        'print(json.dumps({n:m.version(n) for n in ("capstone","lz4","fonttools")}))']) if python_ok else (False, '')
+        'assert zbic.decompress(zbic.compress(b"LumaNX"))==b"LumaNX"; assert zstd.decompress(zstd.compress(b"NUP"))==b"NUP"; '
+        'print(json.dumps({n:m.version(n) for n in ("capstone","lz4","fonttools","zbic")}))']) if python_ok else (False, '')
     try:
         actual = json.loads(output) if ok else {}
-        ok = ok and all(actual.get(k) == versions.get(k) for k in ('capstone','lz4','fonttools'))
+        ok = ok and all(actual.get(k) == versions.get(k) for k in ('capstone','lz4','fonttools','zbic'))
     except (ValueError, AttributeError, TypeError):
         ok = False
     add('Python 扩展', ok, 'capstone / lz4 / fontTools：加载、版本及基本功能检查', repair, 'reinstall', 'bundled', detail=output, location=runtime/'python')

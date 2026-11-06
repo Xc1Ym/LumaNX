@@ -173,8 +173,8 @@ def container_runner(c, g):
 
 
 def prepare(c,g,target='macos'):
-    if g.get('sourceKind')=='dump' and target!='macos':
-        raise Failure('已解包游戏目前仅支持 Mac 运行，尚未开放 IPA 导出。')
+    if g.get('sourceKind') in ('dump','nup') and target!='macos':
+        raise Failure('NUP 与已解包游戏目前仅支持 Mac 运行，尚未开放 IPA 导出。')
     from engine import inspect_source
     info=inspect_source(c)
     dynamic=info.get('derivedProfiles',False) and getattr(c,'r',{}).get('operation')!='migrate'
@@ -232,7 +232,9 @@ def install(c,root,repo,gp,key,host,romfs,modules,shader,aoc=None,font=None):
     stage=dst/'install.partial'; shutil.rmtree(stage,ignore_errors=True); stage.mkdir()
     def cp(src,name):
         if src and Path(src).exists(): clone_tree(src,stage/name,c.progress)
-    cp(romfs,'romfs'); cp(modules,'modules'); cp(shader,'shaders'); cp(aoc,'aoc')
+    if Path(romfs).is_file(): clone(romfs,stage/'romfs.img',c.progress)
+    else: cp(romfs,'romfs')
+    cp(modules,'modules'); cp(shader,'shaders'); cp(aoc,'aoc')
     clone(host,stage/'dmhost'); os.chmod(stage/'dmhost',0o755)
     (stage/'profile').mkdir()
     for name in ['shader_map.tsv','pso_manifest.tsv']:
@@ -269,13 +271,22 @@ def install(c,root,repo,gp,key,host,romfs,modules,shader,aoc=None,font=None):
 
 def validate_runtime(path,gp=None):
     path=Path(path); m=read(path/'manifest.json',{})
-    if not (path/'dmhost').is_file() or not (path/'romfs').is_dir(): raise Failure('运行目录不完整。')
+    romfs=path/'romfs.img' if (path/'romfs.img').is_file() else path/'romfs'
+    if not (path/'dmhost').is_file() or not (romfs.is_file() or romfs.is_dir()): raise Failure('运行目录不完整。')
     mods=gp.words('modules') if gp else [p.name.split('.')[0] for p in (path/'modules').glob('*.patched.bin')]
     if not mods: raise Failure('运行目录缺少代码模块。')
     for mod in mods:
         for ext in ('patched.bin','fixups.tsv','gates.tsv'):
             if not (path/'modules'/f'{mod}.{ext}').is_file(): raise Failure('重写代码模块不完整。')
-    if gp and not (path/'romfs'/gp.get('romfs_marker')).exists(): raise Failure('游戏资源缺少配置指定的文件。')
+    if romfs.is_file():
+        from derived import module
+        rfs=module(Path(__file__).resolve().parents[1]/'Engine/nxnative/dm/tools/romfs.py','lumanx_runtime_romfs')
+        try:
+            image=rfs.Image(romfs)
+            if gp and gp.get('romfs_marker'): image.find(gp.get('romfs_marker'))
+        except FileNotFoundError: raise Failure('游戏资源缺少配置指定的文件。')
+        except (OSError,ValueError): raise Failure('运行目录不完整。')
+    elif gp and not (romfs/gp.get('romfs_marker')).exists(): raise Failure('游戏资源缺少配置指定的文件。')
     if m.get('graphics') in ('vulkan','gl'):
         api='vk' if m['graphics']=='vulkan' else 'gl'
         if not (path/'shaders'/api/(api+'_shaders.metallib')).is_file(): raise Failure('Vulkan 着色器库缺失。')
@@ -301,7 +312,7 @@ def build(c,target='macos'):
         versions=strategy.get('versions') or list(dict.fromkeys(gp.words('shader_versions',gp.get('package'))+[gp.get('package')]))
         capture_gl=gp.get('shader_glslc_capture','off')=='on'; capture_vk=gp.get('shader_vk_capture','off')=='on'; vk=gp.get('graphics','nvn')=='vulkan'
         ms.plan(c,g,target,versions,gp,read(root/'identity.json',{}))
-        base=next(x for x in g['packages'] if x['type']=='base' and x['version']==0)
+        base=next((x for x in g['packages'] if x['type']=='base' and x['version']==0),None)
         sources=list({x['path']:x for x in g['packages']}.values())
         ms.enter(c,'verify','校验游戏源文件');source_total=sum(x['size'] for x in sources);source_done=0
         for x in sources:
@@ -311,7 +322,7 @@ def build(c,target='macos'):
                 dump.verify(c,x)
             elif not p.is_file() or digest(p,lambda n,t:c.progress(source_done+n,source_total))!=x['sha256']: raise Failure('托管源文件已丢失或内容发生改变，请重新导入。')
             source_done+=x['size']
-        needed=sum(x['size'] for x in sources)*2+(10 if target=='ios' else 3)*2**30
+        needed=max(sum(x['size'] for x in sources),g.get('sourceExpandedSize',0))*2+(10 if target=='ios' else 3)*2**30
         if shutil.disk_usage(c.library).free<needed and not st.saved: raise Failure(f'准备游戏需要约 {needed/2**30:.0f} GB 可用空间。')
         dirs={}
         # Recent upstream requires the selected application for multi-app
@@ -322,6 +333,9 @@ def build(c,target='macos'):
             d=root/'extract'/ver; dirs[ver]=d
             if g.get('sourceKind')=='dump':
                 st.run('解包与合并 '+ver,[d],lambda d=d,upd=upd: dump.extract(c,upd or c.library/base['path'],d),milestone=f'unpack-{index}')
+            elif g.get('sourceKind')=='nup':
+                import nup
+                st.run('解包与合并 '+ver,[d],lambda d=d,ver=ver:nup.extract(c,c.library/sources[0]['path'],int(ver[1:]),d),milestone=f'unpack-{index}')
             else:
                 st.run('解包与合并 '+ver,[d],lambda ver=ver,upd=upd: up.extract(c.nx(),c.keys,root/'extract',ver,c.library/base['path'],upd,None,logs,gp,**extraction),milestone=f'unpack-{index}')
         if own:
@@ -332,6 +346,7 @@ def build(c,target='macos'):
         aoc=root/'aoc'; dlcs=[(int(x['titleId'],16),x['version'],c.library/x['path']) for x in g['packages'] if x['type']=='dlc']
         def dlc():
             if g.get('sourceKind')=='dump': dump.extract_dlc(c,[p for p in g['packages'] if p['type']=='dlc'],aoc,gp.id)
+            elif g.get('sourceKind')=='nup': nup.extract_dlc(c,c.library/sources[0]['path'],aoc)
             elif dlcs: up.extract_aoc(c.nx(),c.keys,repo,root,int(gp.id,16),{'dlc':dlcs},logs)
             else: aoc.mkdir(); (aoc/'.empty').write_text('no DLC')
         st.run('处理 DLC',[aoc],dlc,milestone='dlc')
@@ -346,7 +361,8 @@ def build(c,target='macos'):
             if capture_vk: st.run('采集运行时 Vulkan 着色器',[selected/'vk_capture'],lambda:up.capture_vk(repo,selected,patched,root,env,logs,gp) if hasattr(up,'capture_vk') else up.capture_shaders(repo,selected,patched,root,env,logs,gp,'vk'),milestone='capture_vk')
             sh=root/'shader'; sh.mkdir(exist_ok=True)
             if vk:
-                roots=[selected/'RomFS']+([selected/'vk_capture'] if capture_vk else [])
+                from derived import romfs_source, dlc_sources
+                roots=[romfs_source(selected)]+([selected/'vk_capture'] if capture_vk else [])+dlc_sources(aoc)
                 def vulkan_shaders():
                     c.run([sys.executable,repo/'dm/gfx/tools/vk_shaders.py',*roots,sh]+(['--ios',sh/'ios'] if target=='ios' else []),logs/'vk_shaders.log',env)
                     if target=='ios':
@@ -354,7 +370,7 @@ def build(c,target='macos'):
                         validate_shaders(sh/'ios',gp,repo)
                 st.run('转换并编译 Vulkan 着色器',[sh/'vk']+([sh/'ios'] if target=='ios' else []),vulkan_shaders,milestone='shaders')
             else:
-                from derived import detect_sources, oodle_decoder
+                from derived import detect_sources, oodle_decoder, romfs_source, dlc_sources
                 sources_info=detect_sources(up,repo,selected,gp)
                 if st.graph: st.graph.decoder=any(sources_info.get(k,(False,))[0] for k in ('oodle_packs','ue_legacy'))
                 if sources_info.get('ue_decode',(False,))[0]:
@@ -362,7 +378,9 @@ def build(c,target='macos'):
                 oodle=oodle_decoder(up,repo,root,env,gp,patched,sources_info)
                 # Keep the old split API for external engines without decoder support.
                 decoder={'oodle':oodle} if oodle else {}
-                st.run('提取并核对着色器',[sh/'pkg'],lambda:up.split_shaders(sys.executable,repo,[d/'RomFS' for d in dirs.values()]+[d/'glslc_capture' for d in dirs.values() if (d/'glslc_capture').exists()],[d/'ExeFS/main' for d in dirs.values()],sh/'pkg',env,logs,gp,**decoder),milestone='extract')
+                if 'dlc_roms' in signature(up.split_shaders).parameters:
+                    decoder['dlc_roms']=dlc_sources(aoc)
+                st.run('提取并核对着色器',[sh/'pkg'],lambda:up.split_shaders(sys.executable,repo,[romfs_source(d) for d in dirs.values()]+[d/'glslc_capture' for d in dirs.values() if (d/'glslc_capture').exists()],[d/'ExeFS/main' for d in dirs.values()],sh/'pkg',env,logs,gp,**decoder),milestone='extract')
                 def shaders():
                     up.PROG.stage('iOS shaders' if target=='ios' else 'Mac shaders',poll=ShaderProgress(gp,repo,sh/'ios' if target=='ios' else sh/'cache'))
                     try: c.run([sys.executable,repo/'dm/gfx/tools/dmsh_build.py',sh/'pkg',sh/'cache'],logs/'dmsh_build.log',dict(env,IOSOUT=str(sh/'ios')) if target=='ios' else env)
@@ -389,7 +407,8 @@ def build(c,target='macos'):
             else:
                 ms.cached(c);c.emit('cache','已验证并复用完成阶段',done=1,total=1)
                 ms.record(c);return {'path':str(current.resolve()),'cacheKey':key,'version':read(current/'manifest.json')['version']}
-        result=install(c,root,repo,gp,key,root/'tools/dmhost',selected/'RomFS',patched,sh if gp.get('graphics','nvn') in ('vulkan','gl') else sh/'cache',aoc)
+        from derived import romfs_source
+        result=install(c,root,repo,gp,key,root/'tools/dmhost',romfs_source(selected),patched,sh if gp.get('graphics','nvn') in ('vulkan','gl') else sh/'cache',aoc)
         ms.record(c);return result
 
 def migrate(c):
@@ -454,6 +473,7 @@ def launch(c):
             validate(config); cfg=c.private/'runtime-input'/f'{g["id"]}.json'; atomic(cfg,config)
         else: cfg=None
         env=c.env(g['id'],temp); env.update(DM_WINDOW='1',DM_AUDIO='1',DM_LANG=language,DM_ROMFS=str(runtime/'romfs'),DM_SAVE=str(save),DM_TEMP=str(temp),DM_AOC_DIR=str(runtime/'aoc'),DM_FONT_DIR=str(runtime/'font'),DM_MSL_DIR=str(runtime/'shaders'),DM_NVN_SHMAP=str(runtime/'profile/shader_map.tsv'),DM_PSO_USER=str(pso))
+        if (runtime/'romfs.img').is_file(): env['DM_ROMFS']=str(runtime/'romfs.img')
         if cfg: env['DM_INPUT_CONFIG']=str(cfg)
         # Always override inherited state; native controller policy is independent
         # of the optional keyboard/mouse mapping interface. Missing file = labels.
