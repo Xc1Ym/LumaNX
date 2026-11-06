@@ -16,7 +16,7 @@ def main():
     p=pathlib.Path(directory)/name;rel=p.relative_to(ROOT)
     if pathlib.Path(directory)==ROOT and name not in SOURCE_FILES:continue
     if p.is_symlink() or not p.is_file() or any(part in EXCLUDED for part in rel.parts) or p.name=='.DS_Store':continue
-    if p.suffix.lower() in ('.keys','.nsp','.xci','.nsz','.xcz','.ipa','.metallib','.pyc') or p.name=='dmhost':raise RuntimeError('Unexpected generated/private asset: '+str(rel))
+    if p.suffix.lower() in ('.keys','.nsp','.xci','.nsz','.xcz','.nup','.ipa','.metallib','.pyc') or p.name=='dmhost':raise RuntimeError('Unexpected generated/private asset: '+str(rel))
     if any(part.lower() in ('nsc_builder','nsz') for part in rel.parts) or p.name in ('squirrel.py','nsz'):raise RuntimeError('Unexpected external conversion backend: '+str(rel))
     if p.suffix.lower() in ('.png','.jpg','.jpeg','.webp','.ico','.icns','.svg') and str(rel) not in SOURCE_ARTWORK:raise RuntimeError('Unexpected source artwork: '+str(rel))
     z.write(p,PRODUCT['name']+'/'+str(rel));count+=1

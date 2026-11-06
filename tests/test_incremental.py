@@ -200,14 +200,14 @@ class IncrementalBuildTests(unittest.TestCase):
             self.packages[1].update(size=p.stat().st_size,sha256=digest(p));self.save_game()
         self.assertEqual(self.delta(change),['unpack','shaders'])
 
-    def test_dlc_addition_only_extracts_dlc(self):
+    def test_dlc_addition_refreshes_shader_consumers_and_keeps_code_and_host(self):
         self.build()
         def change():
             p=self.c.library/'dlc.nsp';p.write_text('synthetic DLC')
             self.packages.append(dict(type='dlc',version=0,titleId='0100000000011001',baseId=TITLE,
                 path=p.name,size=p.stat().st_size,sha256=digest(p),builds={}))
             self.save_game()
-        self.assertEqual(self.delta(change),['dlc'])
+        self.assertEqual(self.delta(change),['dlc','shaders'])
         runtime=self.c.library/'games'/TITLE/'current'
         self.assertEqual((runtime/'aoc/1/data').read_text(),'synthetic DLC')
 

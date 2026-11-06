@@ -38,7 +38,7 @@ def checkpoints(path):
 
 
 def pipeline_version(target='macos'):
-    names=('incremental.py','build.py','core.py','derived.py','dump.py')+(('ipa.py',) if target=='ios' else ())
+    names=('incremental.py','build.py','core.py','derived.py','dump.py','nup.py')+(('ipa.py',) if target=='ios' else ())
     return hash_value({name:digest(WORKER/name) for name in names})
 
 
@@ -86,8 +86,8 @@ def worker_recipe(kind):
         tree=ast.parse((WORKER/name).read_text())
         coordinator[name]=[ast.dump(n) for n in tree.body if isinstance(n,ast.FunctionDef) and n.name in functions]
     entries={
-        'unpack':{'build.py':('container_runner',),'dump.py':('extract',)},
-        'dlc':{'build.py':('container_runner',),'dump.py':('extract_dlc',)},
+        'unpack':{'build.py':('container_runner',),'dump.py':('extract',),'nup.py':('extract',)},
+        'dlc':{'build.py':('container_runner',),'dump.py':('extract_dlc',),'nup.py':('extract_dlc',)},
         'profile':{'derived.py':('prepare_profile',)},
         'rewrite':{},
         'capture':{},
@@ -225,13 +225,13 @@ class Graph:
             base.update(inputs=self.artifacts(saved,{'unpack'}),profile=self.registered_rows,
                 tables=self.group_keys['profile'],tools=self.group_keys['rewrite'],strategy=self.strategy)
         elif kind=='rewrite':
-            base.update(inputs=self.artifacts(saved,{'unpack'},files=lambda p:'/ExeFS/' in p or Path(p).suffix.lower() in ('.nro','.nrr')),
+            base.update(inputs=self.artifacts(saved,{'unpack'},files=lambda p:'/ExeFS/' in p or Path(p).name=='RomFS.img' or Path(p).suffix.lower() in ('.nro','.nrr')),
                 tools=self.group_keys['rewrite'],profile=self.profile_rows(kind),tables=self.profile_keys['rewrite'])
         elif kind in ('capture','decode','split'):
             # Capture and decoder producers read source/rewrite artifacts, not
             # their own previous outputs or results of later stages. Only the
             # split consumes completed capture/decoder outputs.
-            parents={'unpack','rewrite','capture','decode'} if kind=='split' else {'unpack','rewrite'}
+            parents={'unpack','rewrite','capture','decode','dlc'} if kind=='split' else {'unpack','rewrite'}
             base.update(inputs=self.artifacts(saved,parents),
                 tools=self.group_keys['shader'],profile=self.profile_rows(kind),tables=self.profile_keys['shader'])
             if kind in ('capture','decode'):
@@ -239,7 +239,7 @@ class Graph:
             if kind=='split' and self.decoder:
                 base.update(decoder=self.group_keys['execution'],clang=t.get('clang'),sdk=t.get('macos-sdk'),sdkBuild=t.get('macos-sdk-build'))
         elif kind=='shaders':
-            base.update(inputs=self.artifacts(saved,{'split','capture','decode','unpack'}),
+            base.update(inputs=self.artifacts(saved,{'split','capture','decode','unpack','dlc'}),
                 tools=self.group_keys['shader'],profile=self.profile_rows(kind),tables=self.profile_keys['shader'],
                 chain=self.chain(),metal=t.get('metal'),spirv=t.get('spirv-cross'),ios=t.get('ios'))
         elif kind=='host':

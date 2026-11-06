@@ -69,7 +69,7 @@ def validate(path, c):
             executable = info.get('CFBundleExecutable', '')
             if not executable or '/' in executable or app+executable not in names or info.get('CFBundlePackageType') != 'APPL' or info.get('CFBundleSupportedPlatforms') != ['iPhoneOS']:
                 raise ValueError('iOS executable')
-            if not any(n.startswith(app+'romfs/') for n in names) or not any(n.startswith(app+'msl/') and n.endswith('.metallib') for n in names):
+            if not (app+'romfs.img' in names or any(n.startswith(app+'romfs/') for n in names)) or not any(n.startswith(app+'msl/') and n.endswith('.metallib') for n in names):
                 raise ValueError('game resources')
             total = sum(i.file_size for i in archive.infolist()); done = 0
             for member in archive.infolist():
@@ -95,6 +95,7 @@ def validate_shaders(path, gp, repo):
 
 
 def compile_application(c, root, repo, env, gp, selected, patched, shaders, aoc, up=None):
+    from derived import romfs_source
     built = root/'ipa/game.ipa'; built.parent.mkdir(exist_ok=True)
     font = next((p for p in (Path('/System/Library/Fonts/Supplemental/Arial Unicode.ttf'), Path('/System/Library/Fonts/Helvetica.ttc')) if p.is_file()), None)
     if font is None: raise Failure('找不到本机系统字体。')
@@ -107,7 +108,7 @@ def compile_application(c, root, repo, env, gp, selected, patched, shaders, aoc,
         c.run([sys.executable, Path(__file__).parent/'c1_generate.py', repo/'dm/gfx/tools/c1_guard.py',
                root/'shader/cache'/('b-'+chain), gp.table('c1_full.tsv')], root/'logs/c1.log', env)
     packing = dict(env, GAME=gp.id, W=str(root/'ipa/work'), PATCHED=str(patched),
-                   ROMFS=str(selected/'RomFS'), MSL_IOS=str(shaders), AOC=str(aoc),
+                   ROMFS=str(romfs_source(selected)), MSL_IOS=str(shaders), AOC=str(aoc),
                    GFXAPI=gp.get('graphics','nvn'), FONT_PY=sys.executable, STD_FONT=str(font),
                    DM_DISPLAY_NAME=c.game()['name'], DM_APP_VERSION=gp.builds()[gp.get('package')]['display'],
                    DM_BUNDLE_ID='org.nxnative.'+gp.id.lower())
@@ -129,7 +130,10 @@ def package(c, root, repo, env, gp, selected, patched, shaders, aoc, up=None):
     from core import atomic
     out=destination(c)
     validate_shaders(shaders,gp,repo)
-    if shutil.disk_usage(out.parent).free < sum(p.stat().st_size for p in (selected/'RomFS').rglob('*') if p.is_file()) + 2**30:
+    from derived import romfs_source
+    romfs=romfs_source(selected)
+    size=romfs.stat().st_size if romfs.is_file() else sum(p.stat().st_size for p in romfs.rglob('*') if p.is_file())
+    if shutil.disk_usage(out.parent).free < size + 2**30:
         raise Failure('IPA 保存磁盘空间不足，请释放空间后重试。')
     identity=read(root/'identity.json',{})
     key=hash_value(dict(identity=identity,artifacts=checkpoints(root/'checkpoints.json'),name=c.game()['name'])) if identity.get('pipeline') else None

@@ -35,7 +35,7 @@ def verify_icons():
 
 def verify_source(path):
     from source_archive import EXCLUDED,SOURCE_DIRS,SOURCE_FILES,SOURCE_ARTWORK
-    banned = {'.keys', '.nsp', '.xci', '.nsz', '.xcz', '.ipa', '.metallib', '.pyc'}
+    banned = {'.keys', '.nsp', '.xci', '.nsz', '.xcz','.nup', '.ipa', '.metallib', '.pyc'}
     with zipfile.ZipFile(path) as archive:
         assert archive.testzip() is None
         names = archive.namelist()
@@ -121,7 +121,8 @@ from pathlib import Path
 resources=Path(sys.argv[1]);sys.path.insert(0,str(resources/'Worker'))
 from core import Context
 from toolchain import probe
-import capstone,lz4.block,fontTools
+import capstone,lz4.block,fontTools,zbic
+from compression import zstd
 from fontTools.misc.bezierTools import calcCubicBounds
 from fontTools.cu2qu import cu2qu
 from fontTools.qu2cu import qu2cu
@@ -130,9 +131,11 @@ from fontTools.pens import momentsPen
 from fontTools.feaLib import lexer
 assert calcCubicBounds((0,0),(1,1),(2,1),(3,0)) == (0,0,3,0.75)
 c=Context(dict(schema=1,operation='preflight',resources=str(resources),privateRoot=sys.argv[2]))
-paths=[sys.executable,sys.base_prefix,capstone.__file__,lz4.block.__file__,fontTools.__file__]
+paths=[sys.executable,sys.base_prefix,capstone.__file__,lz4.block.__file__,fontTools.__file__,zbic.__file__]
 assert all(Path(p).resolve().is_relative_to(c.runtime.resolve()) for p in paths),paths
 assert lz4.block.decompress(lz4.block.compress(b'portable'))==b'portable'
+assert zbic.decompress(zbic.compress(b'portable'))==b'portable'
+assert zstd.decompress(zstd.compress(b'NUP'))==b'NUP'
 assert next(capstone.Cs(capstone.CS_ARCH_ARM64,capstone.CS_MODE_ARM).disasm(bytes.fromhex('1f2003d5'),0)).mnemonic=='nop'
 ok,dotnet=probe(c,[c.runtime/'bin/dotnet','--list-runtimes'])
 assert ok and str(c.runtime/'dotnet/shared/Microsoft.NETCore.App') in dotnet,dotnet

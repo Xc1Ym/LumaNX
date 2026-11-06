@@ -336,13 +336,14 @@ final class WorkerOutput: @unchecked Sendable {
     func chooseGames() {
         guard importPrerequisitesReady(requiresKeys:false) else { return }
         let p = NSOpenPanel(); p.title = L("添加游戏文件或扫描文件夹"); p.allowsMultipleSelection = true; p.canChooseDirectories = true; p.canChooseFiles = true
-        p.allowedContentTypes = ["nsp","xci","nsz","xcz"].compactMap { UTType(filenameExtension:$0) }
+        p.allowedContentTypes = ["nsp","xci","nsz","xcz","nup"].compactMap { UTType(filenameExtension:$0) }
         if p.runModal() == .OK { addGames(p.urls) }
     }
     func addGames(_ urls: [URL]) {
         guard !urls.isEmpty else { return }
-        let folders = urls.allSatisfy { (try? $0.resourceValues(forKeys:[.isDirectoryKey]).isDirectory) == true }
-        guard importPrerequisitesReady(requiresKeys:!folders) else { return }
+        let folders = urls.contains { (try? $0.resourceValues(forKeys:[.isDirectoryKey]).isDirectory) == true }
+        let requiresKeys = !folders && urls.contains { $0.pathExtension.lowercased() != "nup" }
+        guard importPrerequisitesReady(requiresKeys:requiresKeys) else { return }
         let libraryId = preferences.libraryId
         let prepare = prepareAfterImport
         if folders {
@@ -538,7 +539,7 @@ final class WorkerOutput: @unchecked Sendable {
         }
     }
     func enqueue(_ game: Game) {
-        guard importPrerequisitesReady(requiresKeys:game.sourceKind != "dump") else { return }
+        guard importPrerequisitesReady(requiresKeys:game.sourceKind != "dump" && game.sourceKind != "nup") else { return }
         guard game.buildable else { error = (game.missing ?? []).joined(separator:"\n"); return }
         guard !queue.contains(game.id), !tasks.contains(where: { $0.operation == "build" && $0.gameId == game.id && $0.active && !$0.id.hasPrefix("queued-") }) else { return }
         queue.append(game.id)

@@ -45,7 +45,7 @@ struct ContentView: View {
                 .toolbar {
                     ToolbarItemGroup(placement:.primaryAction) {
                         if store.selection == "library" || store.selection == nil {
-                        Button(action:store.chooseGames){Label(L(store.importActionTitle),systemImage:"plus")}.help(L("添加游戏包或 Switch 2 已解包目录（⌘O）；已解包目录无需密钥。"))
+                        Button(action:store.chooseGames){Label(L(store.importActionTitle),systemImage:"plus")}.help(L("添加游戏包、NUP 或 Switch 2 已解包目录（⌘O）；NUP 与已解包目录无需密钥。"))
                         }
                     }
                 }
@@ -88,7 +88,7 @@ struct ContentView: View {
                     VStack(spacing:16) {
                         BrandMark(size:104)
                         Text(L("收藏你的第一段旅程")).font(.title2.bold())
-                        Text(!store.environmentReady ? L("先检查系统、Xcode 与 Metal 组件，\n再选择游戏库、导入密钥和游戏。") : L("添加游戏包或 Switch 2 已解包目录。\n游戏包需要 prod.keys；已解包目录无需密钥。")).font(.callout).foregroundStyle(.secondary).multilineTextAlignment(.center)
+                        Text(!store.environmentReady ? L("先检查系统、Xcode 与 Metal 组件，\n再选择游戏库、导入密钥和游戏。") : L("添加游戏包、NUP 或 Switch 2 已解包目录。\nNSP 等游戏包需要 prod.keys；NUP 与已解包目录无需密钥。")).font(.callout).foregroundStyle(.secondary).multilineTextAlignment(.center)
                         Button(action:store.chooseGames){Label(L(store.importActionTitle),systemImage:"plus")}.buttonStyle(.glassProminent).controlSize(.large)
                         Text(L("游戏、密钥与固件均需自行提供")).font(.caption).foregroundStyle(.tertiary)
                     }.frame(maxWidth:.infinity,maxHeight:.infinity)
@@ -151,6 +151,9 @@ struct GameDetail: View {
             if game.sourceKind=="dump" {
                 Label(L("已解包游戏 · 仅 Mac · 实验性"),systemImage:"desktopcomputer").font(.caption).foregroundStyle(.secondary)
             }
+            if game.sourceKind=="nup" {
+                Label(L("NUP 游戏 · 仅 Mac · 实验性"),systemImage:"desktopcomputer").font(.caption).foregroundStyle(.secondary)
+            }
             if game.ready==true {
                 Button {store.launch(game)} label:{Label(L("启动游戏"),systemImage:"play.fill").frame(maxWidth:.infinity)}.buttonStyle(.glassProminent).controlSize(.large).disabled(store.executionBusy || !store.queue.isEmpty)
             } else {
@@ -204,7 +207,7 @@ struct GameDetail: View {
         }
         .onChange(of:game.id) {managementExpanded=false;detailsExpanded=true}
         .sheet(isPresented:$store.showingRecovery,onDismiss:store.applicationSheetDismissed) {GameRecoveryView(game:game).environmentObject(store)}
-        .alert(cleanKind=="sources" ? L("删除托管 NSP 副本？") : L("清理构建缓存？"),isPresented:$confirmClean) {
+        .alert(cleanKind=="sources" ? L("删除托管源文件？") : L("清理构建缓存？"),isPresented:$confirmClean) {
             Button(L("取消"),role:.cancel){}
             Button(L("确认清理"),role:.destructive){store.clean(game,kind:cleanKind)}
         } message:{Text(L("仅处理托管副本；原始文件、存档和上次成功的运行版本保留。其他游戏仍在引用的共享文件会保留。"))}
@@ -252,7 +255,7 @@ struct GameDetail: View {
                     VStack(alignment:.leading,spacing:4) {
                         Button {store.remove(game)} label:{GameToolLabel(title:"移出游戏库（保留文件与存档）",symbol:"minus.circle")}
                         Button(role:.destructive) {cleanKind="cache";confirmClean=true} label:{GameToolLabel(title:"清理构建缓存…",symbol:"trash",destructive:true)}
-                        Button(role:.destructive) {cleanKind="sources";confirmClean=true} label:{GameToolLabel(title:"删除托管 NSP 副本…",symbol:"trash",destructive:true)}
+                        Button(role:.destructive) {cleanKind="sources";confirmClean=true} label:{GameToolLabel(title:"删除托管源文件…",symbol:"trash",destructive:true)}
                     }.padding(6).background(.primary.opacity(0.025))
                 } label: {
                     GameToolLabel(title:"清理与移除",symbol:"trash")
@@ -728,9 +731,9 @@ struct OnboardingView: View {
                         Button(L("选择游戏库文件夹…"),action:store.chooseLibrary).buttonStyle(.glassProminent)
                         Text(store.preferences.library.isEmpty ? L("尚未选择") : store.preferences.library).font(.callout).textSelection(.enabled)
                     } else if step==2 {
-                        Text(L("游戏包需要 prod.keys；Switch 2 已解包目录可跳过此步，无需密钥。")).foregroundStyle(.secondary)
+                        Text(L("NSP 等游戏包需要 prod.keys；NUP 与 Switch 2 已解包目录无需密钥，可跳过此步。")).foregroundStyle(.secondary)
                         Button(L("导入 prod.keys…"),action:store.importKeys).buttonStyle(.glassProminent).disabled(store.importingKeys)
-                        Button(L("仅添加已解包游戏，跳过密钥")){store.onboardingStep=3}.disabled(store.importingKeys)
+                        Button(L("仅添加 NUP 或已解包游戏，跳过密钥")){store.onboardingStep=3}.disabled(store.importingKeys)
                         if let task=store.tasks.first(where:{$0.operation=="keys" && $0.active}) {TaskProgressView(task:task,compact:true)}
                         Label(L(store.keyStatus),systemImage:store.hasImportedKeys ? "checkmark.circle.fill" : "key").foregroundStyle(store.hasImportedKeys ? Color.teal : .secondary)
                         Text(L("导入时检查格式，首次读取游戏时验证解密能力。密钥仅保存在本机私有目录，源文件保持原样。")).font(.caption).foregroundStyle(.secondary)

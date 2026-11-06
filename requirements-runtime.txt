@@ -1,3 +1,4 @@
 capstone==5.0.9
 lz4==4.4.5
 fonttools==4.67.0
+zbic==1.0.1.post1

@@ -6,6 +6,8 @@ release/
 *.nsp
 *.xci
 *.nsz
+*.xcz
+*.nup
 *.ipa
 *.metallib
 __pycache__/

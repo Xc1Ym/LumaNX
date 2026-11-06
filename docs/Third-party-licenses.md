@@ -16,6 +16,6 @@ Pinned Python dependencies and their exact source URLs/hashes are listed in `Run
 
 ## Bundled generic dependencies
 
-CPython (PSF License), .NET runtime (MIT and third-party notices), Capstone (BSD), lz4 (BSD), fontTools (MIT), SPIRV-Cross (Apache-2.0), Zstandard (BSD option), and their runtime dependencies retain their license texts in `Runtime/licenses` and package metadata. Exact versions are recorded in `Runtime/versions.json`. The .NET SDK is installed separately by the user when building the engine reader from source.
+CPython (PSF License), .NET runtime (MIT and third-party notices), Capstone (BSD), lz4 (BSD), fontTools (MIT), SPIRV-Cross (Apache-2.0), Zstandard (BSD option), [zbic](https://github.com/kinnay/zbic) (GPL-2.0), and their runtime dependencies retain their license texts in `Runtime/licenses` and package metadata. Exact versions are recorded in `Runtime/versions.json`. The unmodified zbic source archive, its SHA-256 and source URL are retained in `Runtime/sources`; its license is in `Runtime/licenses/zbic-LICENSE.txt`. The .NET SDK is installed separately by the user when building the engine reader from source.
 
 Apple Xcode, Metal compiler components and fonts are not redistributed. LumaNX includes no games, updates, DLC, firmware, keys, game artwork, saves or player caches. It is not affiliated with, sponsored by or endorsed by Nintendo or game publishers. Import only content you are authorized to use.

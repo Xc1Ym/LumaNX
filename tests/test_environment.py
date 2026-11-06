@@ -26,7 +26,7 @@ class EnvironmentTests(unittest.TestCase):
         self.temp=tempfile.TemporaryDirectory(prefix='lumanx-env-')
         self.root=Path(self.temp.name)
         self.c=Context(dict(schema=1,operation='preflight',privateRoot=str(self.root/'private'),resources=str(self.root/'resources'),engineDir=str(make_engine(self.root/'External 引擎')),developerDir=str(self.root/'Xcode.app/Contents/Developer')))
-        self.versions=dict(python='3.14.8',capstone='5.0.9',lz4='4.4.5',fonttools='4.67.0',dotnet='10.0.13',spirvCross='fixture',zstd='fixture')
+        self.versions=dict(python='3.14.8',capstone='5.0.9',lz4='4.4.5',fonttools='4.67.0',zbic='1.0.1.post1',dotnet='10.0.13',spirvCross='fixture',zstd='fixture')
         atomic(self.c.runtime/'versions.json',self.versions)
         self.developer=Path(self.c.env()['DEVELOPER_DIR'])
         (self.developer/'Platforms/MacOSX.platform').mkdir(parents=True)
@@ -50,7 +50,7 @@ class EnvironmentTests(unittest.TestCase):
         if executable=='xcrun':key=args[1] if args[1]!='--sdk' else args[3]
         if key in self.fail:return False,'broken '+key
         if key=='python':return True,json.dumps(dict(version=self.versions['python'],arch='arm64',prefix=str(c.runtime/'python')))
-        if key=='modules':return True,json.dumps({k:self.versions[k] for k in ('capstone','lz4','fonttools')})
+        if key=='modules':return True,json.dumps({k:self.versions[k] for k in ('capstone','lz4','fonttools','zbic')})
         if key=='dotnet' and '--list-sdks' in args:return True,'10.0.101 [fixture]'
         if key=='dotnet':return True,'Microsoft.NETCore.App 10.0.13 ['+str(c.runtime/'dotnet/shared/Microsoft.NETCore.App')+']'
         if key=='nx_extract':return False,'usage: nx_extract <prod.keys> <base.nsp>'

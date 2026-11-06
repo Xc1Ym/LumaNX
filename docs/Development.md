@@ -68,3 +68,9 @@ The controller patch accepts the original inline mapping and the shared `dm_pad_
 ## Product identity
 
 The Swift package, source target, executable and repository are named **LumaNX**. The original icon is unchanged. `org.nsmac.launcher`, `Application Support/NSMac` and `.nsmac-library.json` remain stable for existing installations and libraries. Historical copyright and third-party notices retain their original names.
+
+## Switch 2 NUP and resource images
+
+`Worker/nup.py` uses the bundled `pack_nup` parser, validates every payload, and stores one managed container. It uses registered versions and build IDs, accepts upstream standalone-update layouts, and packs RomFS and DLC directly into images. `Worker/derived.py:romfs_source` selects images or older directory extractions for shader tools and installation. Mac launch passes the installed image as `DM_ROMFS`; iOS packing also accepts images for ordinary package games. NUP and dump games remain Mac-only. Incremental keys include NUP extraction recipes and resource images consumed by code rewriting.
+
+The runtime bundles pinned `zbic` for system 22+ NSO compression, verifies a real compression/decompression round trip at setup, and includes its original source distribution and license. Development checks require the dependencies in `requirements-runtime.txt`.

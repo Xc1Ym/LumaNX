@@ -3546,5 +3546,61 @@
   {
     "source": "手柄布局保存失败，请检查数据目录权限。",
     "en": "Could not save the controller layout. Check the data directory permissions."
+  },
+  {
+    "source": "请选择 NSP、XCI、NSZ、XCZ、NUP 文件或已解包游戏目录。",
+    "en": "Choose NSP, XCI, NSZ, XCZ or NUP files, or a decrypted game folder."
+  },
+  {
+    "source": "删除托管源文件",
+    "en": "Delete managed source files"
+  },
+  {
+    "source": "删除托管源文件…",
+    "en": "Delete managed source files…"
+  },
+  {
+    "source": "删除托管源文件？",
+    "en": "Delete managed source files?"
+  },
+  {
+    "source": "当前引擎不支持 NUP，请更新璃游。",
+    "en": "This engine does not support NUP. Update LumaNX."
+  },
+  {
+    "source": "NUP 文件无效或内容校验失败：",
+    "en": "Invalid NUP or failed content verification: "
+  },
+  {
+    "source": "校验 NUP 游戏容器",
+    "en": "Verify NUP game container"
+  },
+  {
+    "source": "同一游戏不能混用 NUP 与其他来源，请先清理托管源文件。",
+    "en": "A game cannot mix NUP with other sources. Clear its managed source files first."
+  },
+  {
+    "source": "NUP 中缺少所需游戏版本。",
+    "en": "The required game version is missing from the NUP."
+  },
+  {
+    "source": "NUP 游戏 · 仅 Mac · 实验性",
+    "en": "NUP game · Mac only · Experimental"
+  },
+  {
+    "source": "添加游戏包、NUP 或 Switch 2 已解包目录（⌘O）；NUP 与已解包目录无需密钥。",
+    "en": "Add game packages, NUP files or decrypted Switch 2 folders (⌘O). NUP files and decrypted folders need no keys."
+  },
+  {
+    "source": "添加游戏包、NUP 或 Switch 2 已解包目录。\nNSP 等游戏包需要 prod.keys；NUP 与已解包目录无需密钥。",
+    "en": "Add game packages, NUP files or decrypted Switch 2 folders.\nNSP and similar packages require prod.keys; NUP files and decrypted folders need no keys."
+  },
+  {
+    "source": "NSP 等游戏包需要 prod.keys；NUP 与 Switch 2 已解包目录无需密钥，可跳过此步。",
+    "en": "NSP and similar packages require prod.keys. NUP files and decrypted Switch 2 folders need no keys; skip this step."
+  },
+  {
+    "source": "仅添加 NUP 或已解包游戏，跳过密钥",
+    "en": "Add NUP or decrypted games only; skip keys"
   }
 ]

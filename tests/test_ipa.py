@@ -21,14 +21,14 @@ import ipa
 from engine_fixture import make_engine
 
 
-def archive(path, *, platform='iPhoneOS', resources=True, corrupt=False):
+def archive(path, *, platform='iPhoneOS', resources=True, corrupt=False, image=False):
     path.parent.mkdir(parents=True, exist_ok=True)
     with zipfile.ZipFile(path, 'w', compression=zipfile.ZIP_STORED) as z:
         z.writestr('Payload/Fixture.app/Info.plist', plistlib.dumps(dict(
             CFBundleExecutable='Fixture', CFBundlePackageType='APPL', CFBundleSupportedPlatforms=[platform])))
         z.writestr('Payload/Fixture.app/Fixture', b'synthetic executable')
         if resources:
-            z.writestr('Payload/Fixture.app/romfs/marker', b'synthetic resources')
+            z.writestr('Payload/Fixture.app/romfs.img' if image else 'Payload/Fixture.app/romfs/marker', b'synthetic resources')
             z.writestr('Payload/Fixture.app/msl/vk/test.metallib', b'synthetic shader')
     if corrupt:
         data=path.read_bytes().replace(b'synthetic resources',b'corrupted resources',1)
@@ -114,6 +114,15 @@ class IPATests(unittest.TestCase):
         self.assertEqual(result['outputPath'],str(output))
         self.assertEqual(Path(json.loads(self.c.jobpath.read_text())['outputPath']).resolve(),output)
         self.assertFalse(list(self.root.glob('*.partial')))
+
+    def test_resource_image_is_passed_to_packer_and_accepted_in_ipa(self):
+        shutil.rmtree(self.selected/'RomFS')
+        (self.selected/'RomFS.img').write_bytes(b'synthetic resource image')
+        def run(args,log=None,env=None,**kw):
+            self.assertEqual(env['ROMFS'],str(self.selected/'RomFS.img'))
+            archive(Path(args[-1]),image=True)
+        with patch.object(self.c,'run',side_effect=run): result=self.package()
+        self.quiet(ipa.validate,Path(result['outputPath']),self.c)
 
     def test_incremental_export_reuses_valid_archive_for_a_new_destination(self):
         atomic(self.work/'identity.json',{'pipeline':'synthetic','target':'ios','sources':['synthetic']})

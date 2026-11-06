@@ -117,6 +117,37 @@ print(json.dumps({'schema':1,'taskId':r['taskId'],'type':'result','state':'compl
         XCTAssertTrue(ops.contains("scanImport"));XCTAssertTrue(ops.contains("import"))
         await cleanup(root,store)
     }
+    func testNUPImportPrepareAndIPAGateWithoutKeys() async throws {
+        let (root,store)=try fixture();store.prepareAfterImport=true;store.showOnboarding=false
+        try FileManager.default.removeItem(at:store.privateRoot.appendingPathComponent("keys/prod.keys"))
+        let source=root.appendingPathComponent("Switch 2.NUP")
+        try Data("synthetic transport fixture".utf8).write(to:source)
+        var entry=game("0400000000010000");entry["sourceKind"]="nup"
+        try configure(root,games:[entry],imports:[["id":"0400000000010000","duplicate":false]])
+        store.addGames([source])
+        try await waitUntil {self.operations(root).contains{$0["operation"] as? String == "build"} && !store.executionBusy}
+        XCTAssertFalse(store.showOnboarding)
+        let imported=Store.decode(Game.self,entry)!
+        XCTAssertFalse(imported.canExportIPA)
+        store.generateIPA(imported,destination:root.appendingPathComponent("blocked.ipa"))
+        XCTAssertNotNil(store.error)
+        XCTAssertFalse(operations(root).contains{$0["operation"] as? String == "exportIPA"})
+        await cleanup(root,store)
+    }
+    func testFolderAndNUPSelectionUsesRecursiveKeyClassifier() async throws {
+        let (root,store)=try fixture();store.prepareAfterImport=false;store.showOnboarding=false
+        try FileManager.default.removeItem(at:store.privateRoot.appendingPathComponent("keys/prod.keys"))
+        let folder=root.appendingPathComponent("mixed")
+        try FileManager.default.createDirectory(at:folder,withIntermediateDirectories:true)
+        let nup=root.appendingPathComponent("game.nup");try Data("synthetic".utf8).write(to:nup)
+        try Data("synthetic".utf8).write(to:folder.appendingPathComponent("game.nsp"))
+        store.addGames([folder,nup])
+        try await waitUntil {store.showOnboarding && store.processes.isEmpty}
+        XCTAssertEqual(store.onboardingStep,2)
+        XCTAssertTrue(operations(root).contains{$0["operation"] as? String == "scanImport"})
+        XCTAssertFalse(operations(root).contains{$0["operation"] as? String == "import"})
+        await cleanup(root,store)
+    }
     func testContainerInsideFolderStillRequiresKeys() async throws {
         let (root,store)=try fixture();store.showOnboarding=false
         try FileManager.default.removeItem(at:store.privateRoot.appendingPathComponent("keys/prod.keys"))

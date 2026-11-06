@@ -26,7 +26,7 @@ def audit(root):
             if not actual or actual!=record.get('files') or any(p.is_dir() or p.is_symlink() for p in reader_root.iterdir()):raise RuntimeError('Bundled reader integrity check failed')
             info=inspect_source(SimpleNamespace(engine=engine_root,resource=engine_root.parents[1]))
             if record.get('fingerprint')!=info['fingerprint']:raise RuntimeError('Bundled reader does not match packaged engine')
-    banned={'.nsp','.xci','.nsz','.xcz','.ipa','.keys','.metallib','.patched.bin'}
+    banned={'.nsp','.xci','.nsz','.xcz','.nup','.ipa','.keys','.metallib','.patched.bin'}
     for p in root.rglob('*'):
         if not p.is_file():continue
         rel=p.relative_to(root)
@@ -77,7 +77,7 @@ def verify_app_runtime(app,env):
     # Match the worker's GUI environment; a system/Homebrew tool must not hide a
     # missing bundled executable. Exercise the same Python -> child lookup.
     smoke_env=dict(env,PATH=os.pathsep.join([str(runtime/'bin'),str(runtime/'python/bin'),'/usr/bin','/bin','/usr/sbin','/sbin']),PYTHONNOUSERSITE='1')
-    code="import capstone,lz4.block,fontTools,pathlib,shutil,subprocess,sys; p=shutil.which('spirv-cross'); assert p and pathlib.Path(p).parent==pathlib.Path(sys.argv[1]), 'Bundled spirv-cross missing'; subprocess.run(['spirv-cross','--revision'],check=True,stdout=subprocess.DEVNULL); print('Packaged Python and spirv-cross child OK')"
+    code="import capstone,lz4.block,fontTools,zbic,pathlib,shutil,subprocess,sys; assert zbic.decompress(zbic.compress(b'NUP'))==b'NUP'; p=shutil.which('spirv-cross'); assert p and pathlib.Path(p).parent==pathlib.Path(sys.argv[1]), 'Bundled spirv-cross missing'; subprocess.run(['spirv-cross','--revision'],check=True,stdout=subprocess.DEVNULL); print('Packaged Python and spirv-cross child OK')"
     run([runtime/'python/bin/python3','-B','-I','-c',code,runtime/'bin'],env=smoke_env)
     run([resources/'Engine/nxnative/dm/gfx/tools/spirv_cross_bin/spirv-cross','--revision'],env=smoke_env,stdout=subprocess.DEVNULL)
     run(['codesign','--verify','--deep','--strict',app])
