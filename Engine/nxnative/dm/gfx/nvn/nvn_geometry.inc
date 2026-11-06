@@ -321,7 +321,7 @@ static geo_access geo_access_of(NvProg *pr, NvShader *gs) {
                 const p_bind_buf *u=b->kind==NVN_RB_SBUFP?&S.ssbo[st][b->reg]:&S.ubo[st][b->reg];
                 int write=b->kind==NVN_RB_SBUFP && b->rw && !(sh->sb_ro>>b->reg&1);
                 geo_access_add(&a,u->addr,b->kind==NVN_RB_CBUF?cb_len(sh,b->reg,u->size):u->size,write);
-            } else if (b->kind==NVN_RB_SBUFU || b->kind==NVN_RB_IMG || b->kind==NVN_RB_TBUF) a.unknown=1;
+            } else if (b->kind==NVN_RB_SBUFU || b->kind==NVN_RB_IMG || b->kind==NVN_RB_IMGU || b->kind==NVN_RB_TBUF || b->kind==NVN_RB_TBUFU) a.unknown=1;
         }
     }
     return a;
@@ -397,7 +397,7 @@ static id<MTLFunction> geo_mesh_fn(NvProg *pr, const p_draw *dw, const p_draw_id
     NSString *k = @(lean->key); id f = vs->geo_mesh[k];
     if (!f) {
         NSString *path = [NSString stringWithFormat:@"%@/%.16s_%.16s_m3.metallib", g_msl_dir, vs->key, lean->key];
-        id<MTLLibrary> lib = [NSFileManager.defaultManager fileExistsAtPath:path] ? [g_dev newLibraryWithURL:[NSURL fileURLWithPath:path] error:nil] : nil;
+        id<MTLLibrary> lib = lib_from_file(path, NULL);
         NSString *want = [vs->fn.name isEqualToString:@"main0_z"] ? @"dm_mesh_z" : @"dm_mesh";
         f = lib ? [lib newFunctionWithName:want] : nil;
         if (lib && !f) for (NSString *nm in lib.functionNames) if ([nm hasPrefix:[want stringByAppendingString:@"_p"]]) { f = [lib newFunctionWithName:nm]; break; }   // fewer triangles a group (dm_mesh_p16)
