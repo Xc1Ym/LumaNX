@@ -1,16 +1,17 @@
-# LumaNX 0.4.0
+# LumaNX 0.4.1
 
 ## Changes
 
-- **Import Switch 2 NUP packages.** Switch 2 `.nup` containers are now imported without keys and prepared like directory sources, using the registered nxnative game profiles and versions. The base, update and DLC payloads inside the container are read and verified against a single managed copy; full standalone updates and empty-base placeholders per the upstream layout are supported, and the name, version and cover from the control data are shown. NUP sources cannot be mixed with other sources, and Switch 2 games keep IPA export disabled.
-- **One-pass copy with safer catalogue updates.** The original file is copied and hashed in a single pass, then every payload — including versions and DLC not selected to run — is verified from the staged copy. A failed or cancelled save restores the existing cover and catalogue, and temporary files never outlive the attempt. Update records must identify the same application family, control data is size-bounded before parsing, and covers are accepted only with JPEG/PNG magic and sane sizes; invalid optional metadata falls back to the registered profile defaults.
-- **Resource images and DLC shaders.** Shader processing, Mac installation and launch now cover `RomFS.img` and DLC images, and IPA packaging works for regular packages. Incremental preparation records the resource-image and DLC-shader dependencies, keeps cancellation state, and preserves the last good run version on failure.
-- **Engine sync and pinned ZBIC.** The bundled nxnative snapshot is synced to upstream [2eb71820aece65dbc30dd17df5483a20483eac0d](https://github.com/seedds/nxnative/commit/2eb71820aece65dbc30dd17df5483a20483eac0d) while keeping the local gamepad and SDK compatibility patches. The bundled `zbic==1.0.1.post1` runs a decode check on every build, and the runtime package retains the original sources, fixed hash and license.
-- **Updated documentation.** Bilingual import hints, usage and engine-modification docs, acceptance records, and broader release checks that NUP player files never enter distributed archives.
+- **Engine snapshot sync.** The bundled nxnative snapshot moves from upstream [2eb71820aece65dbc30dd17df5483a20483eac0d](https://github.com/seedds/nxnative/commit/2eb71820aece65dbc30dd17df5483a20483eac0d) to [b2d46b86d03f4b03afe11ea61c67cdf00d7a5345](https://github.com/seedds/nxnative/commit/b2d46b86d03f4b03afe11ea61c67cdf00d7a5345), keeping the local gamepad and SDK compatibility patches. The translator binaries are rebuilt with it (a new shader-chain stamp), and Mac / iOS games rebuild their shader libraries on first launch after the update.
+- **Three more registered games.** ŌKAMI HD, Sonic Superstars and Minecraft Dungeons II join the registered profiles, and several existing profiles gain refreshed shader tables.
+- **Damaged game files stop the build early.** Files whose bytes do not start as their names promise — a `.zs` texture that is not a zstd stream, as found in a damaged Ocarina of Time copy that pegged the CPU in the background loader — now stop packing with a clear list instead of producing a broken install; `--allow-damaged` packs them as they are. The check is cached beside the image, so an unchanged game is not read again.
+- **Shader-library images.** Shader libraries are now stored as single images (`b-<chain>.img`) instead of folder trees, shrinking game caches and speeding up incremental runs; bug reports and regression tooling read both layouts.
+- **Progress and reporting.** Shader-build progress is reported from the build tool itself (per-stage counts instead of file watching), and audio, video-codec, display-history and probe fixes land with the snapshot alongside a broadened engine test suite.
+- **Daily-sync robustness.** The native input harness now stubs the controller applet's HID service call, so the daily engine sync's link check stays green without touching production engine code.
 
 ## Installation and validation
 
-Download **LumaNX-0.4.0-arm64.dmg** and verify the SHA-256 below. Quit the app and active tasks before replacing the application. The application identifier and existing libraries, saves and settings are retained.
+Download **LumaNX-0.4.1-arm64.dmg** and verify the SHA-256 below. Quit the app and active tasks before replacing the application. The application identifier and existing libraries, saves and settings are retained.
 
 Requires Apple Silicon and macOS 26+. Uses **ad-hoc signing and is not notarized**. Game preparation requires full Xcode with Metal; IPA export also requires the iOS platform and XcodeGen.
 
@@ -20,13 +21,14 @@ The release workflow runs Python and Swift regression tests, native controller a
 
 ## 中文说明
 
-- **支持导入 Switch 2 NUP 封包。** `.nup` 文件现在可免密钥导入，按已登记的 nxnative 游戏配置与版本像目录来源一样准备。容器内的本体、更新与 DLC 读取校验后共用一份托管副本；支持上游规定的完整独立更新与空本体占位，并读取控制数据中的名称、版本与封面。NUP 不能与其他来源混用，Switch 2 继续禁用 IPA 导出。
-- **单遍复制，目录更新更安全。** 原文件单遍复制并计算哈希，再从暂存副本校验每个 payload（含未选用的版本与 DLC）。保存失败或取消时恢复已有封面与目录，临时文件不遗留。更新记录必须属于同一应用家族，控制数据先限长再解析，封面只接受 JPEG/PNG 魔数与合理大小；无效可选元数据回退到登记配置默认值。
-- **资源镜像与 DLC 着色器。** `RomFS.img` 与 DLC 镜像接入着色器处理、Mac 安装与启动，普通游戏包支持 IPA 打包。增量准备记录资源镜像与 DLC 着色器依赖，保留取消状态，失败时保留最近一次成功运行版本。
-- **引擎同步与固定 ZBIC。** 内置 nxnative 同步至上游 [2eb71820aece65dbc30dd17df5483a20483eac0d](https://github.com/seedds/nxnative/commit/2eb71820aece65dbc30dd17df5483a20483eac0d)，保留本地手柄与 SDK 兼容补丁；内置 `zbic==1.0.1.post1` 每次构建执行解码检查，运行包保留原版源码、固定哈希与许可证。
-- **更新文档。** 中英文导入提示、使用与引擎修改文档、验收记录，并扩展发行包对 NUP 玩家文件的排除检查。
+- **引擎快照同步。** 内置 nxnative 从上游 [2eb71820aece65dbc30dd17df5483a20483eac0d](https://github.com/seedds/nxnative/commit/2eb71820aece65dbc30dd17df5483a20483eac0d) 同步至 [b2d46b86d03f4b03afe11ea61c67cdf00d7a5345](https://github.com/seedds/nxnative/commit/b2d46b86d03f4b03afe11ea61c67cdf00d7a5345)，保留本地手柄与 SDK 兼容补丁。翻译器二进制随之重建（新的着色器链印记），更新后 Mac / iOS 游戏首次启动会重建着色器库。
+- **再登记三款游戏。** ŌKAMI HD（大神 HD）、Sonic Superstars（索尼克 超级群星）与 Minecraft Dungeons II（我的世界 地下城 2）加入已登记配置，多款既有配置的着色器表同步刷新。
+- **损坏游戏文件提前拦截。** 文件字节与其扩展名承诺不符——例如不是 zstd 流的 `.zs` 贴图（一份损坏的《塞尔达传说 时之笛》正因此导致后台加载器 CPU 占用异常）——现在会在打包时以清晰清单中止，而不再产出坏安装包；`--allow-damaged` 可按原样打包。检查结果缓存于镜像旁，未变更的游戏不会重复读取。
+- **着色器库镜像化。** 着色器库改为单一镜像文件（`b-<chain>.img`）而非目录树，游戏缓存更小、增量运行更快；问题报告与回归工具同时兼容两种布局。
+- **进度与修复。** 着色器构建进度改由构建工具自身上报（按阶段计数，替代文件监视）；快照同时带来音频、视频解码、显示历史与探针修复，并扩充引擎测试覆盖。
+- **每日同步更稳。** 原生输入测试为控制器弹窗的 HID 服务调用补充测试桩，每日引擎同步的链接检查保持通过，生产引擎代码零改动。
 
-下载 **LumaNX-0.4.0-arm64.dmg**，按下方 SHA-256 校验，退出应用及任务后替换应用。应用标识、现有游戏库、存档与设置保持兼容。
+下载 **LumaNX-0.4.1-arm64.dmg**，按下方 SHA-256 校验，退出应用及任务后替换应用。应用标识、现有游戏库、存档与设置保持兼容。
 
 要求 Apple Silicon、macOS 26 及以上；采用临时签名，尚未公证。准备游戏需完整 Xcode 与 Metal，导出 IPA 另需 iOS 平台与 XcodeGen。
 
