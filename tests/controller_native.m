@@ -21,6 +21,9 @@ void dm_pad_set_player(int p,uint64_t b,int32_t x,int32_t y,int32_t z,int32_t w)
 void dm_pad_set(uint64_t b,int32_t x,int32_t y,int32_t z,int32_t w) {dm_pad_set_player(0,b,x,y,z,w);}
 void dm_pad_players(uint32_t mask) {(void)mask;}
 uint32_t dm_player_npad(int p) {return (uint32_t)p;}
+// The controller applet queries HID service state. This input-only harness
+// never opens that prompt; fail if it unexpectedly reaches the service.
+int dm_players_reported(void) {abort();}
 void dm_touch_set(const dm_touch *t,int n) {(void)t;(void)n;}
 void dm_focus_set(int s) {(void)s;}
 void dm_audio_suspend(int s) {(void)s;}
