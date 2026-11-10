@@ -31,6 +31,27 @@ void dm_gfx_suspend(int s) {(void)s;}
 void dm_haptics_apple_init(void) {}
 void dm_haptics_apple_controller(int p,GCController *c) {(void)p;(void)c;}
 void dm_haptics_apple_shutdown(void) {}
+#if __has_include("pad_switch2_apple.h")
+// Replace the Bluetooth transport and service sinks, keeping the production
+// Switch 2 front-end input, slot, rumble routing and cleanup paths under test.
+static s2_pad *testSwitch2Pads;
+static int switch2Active = -1;
+static void (*rumbleSinks[DM_PLAYERS])(const dm_haptic_state *);
+static unsigned joyClears[DM_PLAYERS][2];
+int dm_switch2_start(const dm_switch2_front *front) {(void)front;abort();}
+s2_pad *dm_switch2_pads(void) {return testSwitch2Pads;}
+void dm_switch2_active(int on) {switch2Active=on;}
+void dm_switch2_rumble(const dm_haptic_state *state) {(void)state;abort();}
+void dm_haptics_apple_set_sink(int p,void (*sink)(const dm_haptic_state *)) {
+    assert(p>=0&&p<DM_PLAYERS);rumbleSinks[p]=sink;
+}
+void dm_joy_set(int p,int side,uint64_t buttons,int32_t sx,int32_t sy) {
+    assert(p>=0&&p<DM_PLAYERS&&side>=0&&side<2);
+    // Only the front end's focus cleanup writes Joy-Con state here; report
+    // decoding belongs to the transport and the engine's own protocol tests.
+    assert(!buttons&&!sx&&!sy);joyClears[p][side]++;
+}
+#endif
 // The front end now includes the cheats UI. This input-only harness never opens
 // it; fail if it reaches those services instead of loading any player state.
 // The engine's t_cheats suite exercises the real implementation separately.
@@ -185,6 +206,30 @@ int main(void) {
         pads_changed(c);assert(received[p]==0&&axes[p][0]==0);assert(g_held[p]==nil);
 #if __has_include("motion_apple.h")
         assert(motion_clears[p]>0);
+#endif
+#if __has_include("pad_switch2_apple.h")
+        // A synthetic Bluetooth pad exercises the new front-end paths without
+        // scanning, pairing, sending rumble, or requiring a physical device.
+        s2_pad bluetooth={0};snprintf(bluetooth.name,sizeof bluetooth.name,"Switch 2 fixture");
+        bluetooth.st.pro.have=1;bluetooth.st.pro.pid=S2_PID_PRO;
+        s2_cal_default(&bluetooth.st.pro.cal[0]);s2_cal_default(&bluetooth.st.pro.cal[1]);
+        bluetooth.st.pro.r.buttons=S2_A|S2_R;
+        bluetooth.st.pro.r.lx=3248;bluetooth.st.pro.r.ly=2048;
+        bluetooth.st.pro.r.rx=2048;bluetooth.st.pro.r.ry=1448;
+        testSwitch2Pads=&bluetooth;s2pad_attach(&bluetooth);
+        int bp=s2pad_player(&bluetooth);assert(bp>=0&&bp<DM_PLAYERS);
+        assert(rumbleSinks[bp]==dm_switch2_rumble);
+        s2pad_read(&bluetooth);
+        assert(received[bp]==(DM_BTN_A|DM_BTN_R)&&axes[bp][0]>0&&axes[bp][3]<0);
+        input_release();assert(switch2Active==0);
+        assert(received[bp]==0&&axes[bp][0]==0&&axes[bp][3]==0);
+        assert(joyClears[bp][0]==1&&joyClears[bp][1]==1);
+        s2pad_read(&bluetooth);assert(received[bp]==0);
+        g_input_on=1;s2pad_read(&bluetooth);assert(received[bp]==(DM_BTN_A|DM_BTN_R));
+        testSwitch2Pads=NULL;s2pad_detach(&bluetooth);
+        assert(s2pad_player(&bluetooth)==-1&&rumbleSinks[bp]==NULL);
+        assert(received[bp]==0&&axes[bp][0]==0&&axes[bp][3]==0);
+        puts("PASS: synthetic Switch 2 input, rumble routing, focus and disconnect cleanup");
 #endif
         method_exchangeImplementations(discovery,fixtureDiscovery);
         puts("PASS: native GameController face buttons, combos, axes, focus and disconnect cleanup");
