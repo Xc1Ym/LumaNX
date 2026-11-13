@@ -9,7 +9,7 @@ ROOT=Path(__file__).resolve().parents[1]
 sys.path[:0]=[str(ROOT/'Worker'),str(ROOT/'scripts')]
 from bundled_engine import inventory, verify_bundle
 from engine_fixture import make_engine
-from sync_engine import sync, patch_sdk_compatibility
+from sync_engine import sync, patch_ci_compatibility, patch_sdk_compatibility
 
 
 class EngineSyncTests(unittest.TestCase):
@@ -95,6 +95,26 @@ class EngineSyncTests(unittest.TestCase):
             sync(self.source,self.target)
         self.assertEqual(inventory(self.target),before)
         verify_bundle(self.target)
+
+    def test_save_sync_host_test_accepts_virtual_mac_device_name(self):
+        path=self.source/'dm/host/tests/t_save_sync.c';path.parent.mkdir(parents=True,exist_ok=True)
+        path.write_text('CHECK(REPORT(R2, cloud4) && strstr(line, "conflict=1") && strstr(line, "cfiles=1 ") && strstr(line, "cdevice=Mac"),\n'
+                        '      "both changed: the report says conflict, with the cloud\'s device (%s)", line);\n')
+        self.commit();sync(self.source,self.target)
+        imported=self.target/'dm/host/tests/t_save_sync.c';text=imported.read_text()
+        self.assertIn('strstr(line, "cdevice=") && !strstr(line, "cdevice=- ")',text)
+        self.assertNotIn('strstr(line, "cdevice=Mac")',text)
+        patch_ci_compatibility(self.target);self.assertEqual(imported.read_text(),text)
+        verify_bundle(self.target)
+
+    def test_save_sync_host_test_drift_preserves_previous_snapshot(self):
+        sync(self.source,self.target);before=inventory(self.target)
+        path=self.source/'dm/host/tests/t_save_sync.c';path.parent.mkdir(parents=True,exist_ok=True)
+        path.write_text('CHECK(changed_device_contract,\n'
+                        '      "both changed: the report says conflict, with the cloud\'s device (%s)", line);\n')
+        self.commit()
+        with self.assertRaisesRegex(RuntimeError,'save-sync CI interface changed'):sync(self.source,self.target)
+        self.assertEqual(inventory(self.target),before);verify_bundle(self.target)
 
     def test_phone_motion_sdk_guard_survives_sync_and_reapplication(self):
         ios=self.source/'dm/ios/Sources/DmGamepad.m'
