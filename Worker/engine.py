@@ -216,7 +216,10 @@ def prepare(c):
                     output.mkdir()
                     for name in files: shutil.copy2(shipped/name, output/name)
                 else:
-                    c.run([sdk, 'publish', repo/'dm/tools/nx_extract/nx_extract.csproj', '-c', 'Release', '-r', 'osx-arm64', '--self-contained', 'false', '--disable-build-servers', '-p:UseSharedCompilation=false', '--configfile', config, '-o', output, '-v', 'quiet'], env=sdk_env(c,sdk), cwd=repo)
+                    # Upstream may publish its committed universal reader with NativeAOT. LumaNX adds its private
+                    # metadata adapter after copying the source, so build a framework-dependent reader from that
+                    # adapted snapshot; NativeAOT requires a self-contained publish and cannot produce this layout.
+                    c.run([sdk, 'publish', repo/'dm/tools/nx_extract/nx_extract.csproj', '-c', 'Release', '-r', 'osx-arm64', '--self-contained', 'false', '-p:PublishAot=false', '--disable-build-servers', '-p:UseSharedCompilation=false', '--configfile', config, '-o', output, '-v', 'quiet'], env=sdk_env(c,sdk), cwd=repo)
                 for name in ('nx_extract','nx_extract.dll','LibHac.dll','nx_extract.runtimeconfig.json'):
                     if not (output/name).is_file(): raise Failure('引擎读取工具编译后缺少必需产物。')
                 shutil.copytree(output, stage/'tools/nx_extract')
