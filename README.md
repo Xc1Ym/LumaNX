@@ -30,7 +30,7 @@ LumaNX is a third-party graphical frontend for **[nxnative](https://github.com/s
 
 Switch Pro, Xbox and PlayStation controllers connect through Apple's GameController framework. The native button policy maps Switch A / Xbox A / PlayStation cross to game A. Re-prepare existing games after an engine update to apply runtime changes.
 
-Current release: **0.3.0** · [Release notes](docs/RELEASE_NOTES.md)
+Current release: **0.4.2** · [Release notes](docs/RELEASE_NOTES.md)
 
 ## Get started
 
