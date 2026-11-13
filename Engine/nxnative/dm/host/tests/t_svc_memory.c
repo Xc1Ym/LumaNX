@@ -185,6 +185,33 @@ static void alias_lifecycle(void) {
     assert(pages(1, alias + g_alias_cap - P, 2 * P) == BAD);
 }
 
+// Device-shared memory (an NVN memory pool's storage, hle_nvn.c) is not given back: UnmapPhysicalMemory or a shrinking SetHeapSize over any page of it fails with InvalidCurrentMemory and
+// leaves every page and byte as it was, as on Horizon; once the pool is gone (each registration removed) both work again (PR #1616, Monster Jam Steel Titans 2)
+static void device_shared_refused(void) {
+    assert(!pages(1, alias, 16 * P));
+    memset((void *)alias, 0x6d, 16 * P);
+    int64_t mapped = g_alias_mapped;
+    dm_device_share((void *)(alias + 4 * P), 4 * P, 1); dm_device_share((void *)(alias + 4 * P), 4 * P, 1);   // two pools over the same storage
+    assert(pages(0, alias + 7 * P, 2 * P) == BAD && pages(0, alias, 16 * P) == BAD && pages(0, alias + 4 * P, 4 * P) == BAD);
+    assert(g_alias_mapped == mapped);
+    for (size_t i = 0; i < 16 * P; ++i) assert(((uint8_t *)alias)[i] == 0x6d);
+    assert(!pages(0, alias + 12 * P, 4 * P) && !pages(0, alias, 2 * P));   // beside it: given back
+    assert(!pages(1, alias + 2 * P, 2 * P) && !pages(1, alias + 8 * P, 2 * P));   // touching it on either side: still allowed
+    dm_device_share((void *)(alias + 4 * P), 4 * P, 0);
+    assert(pages(0, alias + 4 * P, P) == BAD);   // the other pool still holds it
+    dm_device_share((void *)(alias + 4 * P), 4 * P, 0);
+    assert(!pages(0, alias, 16 * P) && !g_alias_mapped);
+    assert(!resize(4 * 1024 * 1024));
+    dm_device_share((void *)(heap + 3 * 1024 * 1024), P, 1);
+    assert(resize(2 * 1024 * 1024) == BAD && g_heap_cur == 4 * 1024 * 1024);
+    dm_device_share((void *)(heap + 3 * 1024 * 1024), P, 0);
+    dm_device_share((void *)(heap + 1024 * 1024), P, 1);
+    assert(!resize(2 * 1024 * 1024) && g_heap_cur == 2 * 1024 * 1024);   // below the new end: left alone
+    assert(resize(0) == BAD);
+    dm_device_share((void *)(heap + 1024 * 1024), P, 0);
+    assert(!resize(0));
+}
+
 static void ownership(void) {
     assert(!pages(1, alias, 16 * P));
     memset((void *)alias, 0x34, 16 * P);
@@ -470,6 +497,29 @@ static void file_rule(void) {
     assert(!guest_file_wanted(NULL, pool9, 0));   // no limit known: the Mac
     assert(!guest_file_wanted("0", pool9, 8 * G) && guest_file_wanted("1", pool3, 12 * G) && guest_file_wanted("1", pool3, 0));
 }
+// With the guest in files, what the game gives back in the alias region is punched out by the sweep once it has stayed given back over a whole sweep interval: a page mapped again in between keeps
+// its blocks, the rest give theirs back and read 0 when mapped again
+static double file_blocks(void) { double b = 0; struct stat st; for (int i = 0; i < g_gf_n; i++) if (!fstat(g_gf_tab[i], &st)) b += st.st_blocks * 512.0; return b; }
+static void file_sweep(void) {
+    if (!g_gf_n) return;
+    size_t pg = memory_getpagesize(); uintptr_t a = alias + 64 * pg;
+    guest_file_sweep(); guest_file_sweep();                       // what the tests before gave back
+    assert(!pages(1, a, 8 * pg));
+    memset((void *)a, 0x77, 8 * pg); assert(!msync((void *)a, 8 * pg, MS_SYNC));
+    double b0 = file_blocks(); uint64_t p0 = g_gf_punched;
+    assert(b0 >= 8.0 * pg);
+    assert(!pages(0, a, 8 * pg));
+    guest_file_sweep();                                           // given back since the last sweep: only aged
+    assert(g_gf_punched == p0 && file_blocks() == b0);
+    assert(!pages(1, a, pg));                                     // in use again: not punched
+    guest_file_sweep();
+    assert(g_gf_punched == p0 + 7 * pg && file_blocks() <= b0 - 7.0 * pg);
+    for (size_t i = 0; i < pg; ++i) assert(((uint8_t *)a)[i] == 0);   // zeroed when mapped again (alias_initialize), as before
+    assert(!pages(1, a + pg, 7 * pg));
+    for (size_t i = 0; i < 7 * pg; ++i) assert(((uint8_t *)a)[pg + i] == 0);
+    assert(!pages(0, a, 8 * pg));
+    guest_file_sweep(); guest_file_sweep();
+}
 static void heap_regrow(void) {
     assert(!resize(4 * 1024 * 1024));
     memset((void *)(heap + 3 * 1024 * 1024), 0x5a, P);
@@ -552,7 +602,7 @@ int main(int argc, char **argv) {
     if (!getenv("DM_ALIAS_SIZE")) assert(info(I_AliasSize) == SWITCH_ALIAS);   // the Mac's alias region is a Switch's, whatever the profile can give an iPhone; DM_ALIAS_SIZE=<mem_alias> runs these tests on an iPhone's
 #endif
     layout_order();
-    lazy_commit(); alias_lifecycle(); ownership(); module_sources(); module_back_patch(); failures(); release_fallback(); file_rule(); heap_regrow(); concurrency(); fragmented_queries();
+    lazy_commit(); alias_lifecycle(); device_shared_refused(); ownership(); module_sources(); module_back_patch(); failures(); release_fallback(); file_rule(); file_sweep(); heap_regrow(); concurrency(); fragmented_queries();
     guest_helper();
     if (!DM_GAME_MEM_MAP_LIMIT) metadata_limit();
 #ifdef TEST_REAL_DIRTY
