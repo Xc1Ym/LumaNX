@@ -101,8 +101,9 @@ class ExternalEngineTests(unittest.TestCase):
         self.assertTrue(engine.inspect_source(self.c)['inputConfig'])
     def test_preparation_failure_keeps_existing_cache_and_cleans_partial(self):
         before=engine.source_hash(self.source)
-        with patch('engine.find_sdk',return_value=(Path('/sdk/dotnet'),'10.0.101')),patch.object(self.c,'run',side_effect=Failure('compile failure')),contextlib.redirect_stdout(io.StringIO()):
+        with patch('engine.find_sdk',return_value=(Path('/sdk/dotnet'),'10.0.101')),patch.object(self.c,'run',side_effect=Failure('compile failure')) as run,contextlib.redirect_stdout(io.StringIO()):
             with self.assertRaisesRegex(Failure,'compile failure'):engine.prepare(self.c)
+        self.assertIn('-p:PublishAot=false',run.call_args.args[0])
         self.assertEqual(before,engine.source_hash(self.source))
         self.assertFalse(list(self.c.private.glob('engines/.partial-*')))
 
