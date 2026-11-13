@@ -4,6 +4,7 @@ All game data here is synthetic. Real player files never enter test fixtures.
 """
 import contextlib
 import importlib.util
+import inspect
 import io
 from pathlib import Path
 import sys
@@ -201,7 +202,12 @@ class ContainerSelectionTests(unittest.TestCase):
             spec=importlib.util.spec_from_file_location('lumanx_extraction_test',repo/'scripts/build_ipa_from_nsp.py')
             up=importlib.util.module_from_spec(spec);spec.loader.exec_module(up)
             up.PROG=up.Progress('off');up.run=build.container_runner(c,game)
-            up.extract(reader,root/'synthetic.keys',root/'extract','v0',source,None,None,logs,{'romfs_marker':'marker'},int(TITLE,16))
+            extract_args=dict(nx=reader,keys=root/'synthetic.keys',ex=root/'extract',name='v0',base=source,upd=None,
+                              logs=logs,g={'romfs_marker':'marker'},app=int(TITLE,16))
+            parameters=inspect.signature(up.extract).parameters
+            if 'cmp_dir' in parameters: extract_args['cmp_dir']=None
+            if 'repo' in parameters: extract_args['repo']=repo
+            up.extract(**extract_args)
             self.assertEqual(calls[0][calls[0].index('--app')+1],TITLE.lower())
             up.extract_aoc(reader,root/'synthetic.keys',repo,root,int(TITLE,16),{'dlc':[(int('0100000000011002',16),42,source)]},logs)
             self.assertTrue((root/'extract/v0/RomFS/marker').is_file())
