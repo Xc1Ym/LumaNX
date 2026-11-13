@@ -61,6 +61,21 @@ def patch_sdk_compatibility(root):
     path.write_text(text.replace(old,guarded))
 
 
+def patch_ci_compatibility(root):
+    """Keep upstream host tests valid on GitHub's virtual Apple Silicon Macs."""
+    path = root/'dm/host/tests/t_save_sync.c'
+    if not path.exists(): return
+    text = path.read_text()
+    scenario = '"both changed: the report says conflict, with the cloud\'s device (%s)"'
+    if scenario not in text: return
+    old = 'strstr(line, "conflict=1") && strstr(line, "cfiles=1 ") && strstr(line, "cdevice=Mac")'
+    fixed = 'strstr(line, "conflict=1") && strstr(line, "cfiles=1 ") && strstr(line, "cdevice=") && !strstr(line, "cdevice=- ")'
+    if fixed in text: return
+    if text.count(old) != 1:
+        raise RuntimeError('Upstream save-sync CI interface changed: '+str(path))
+    path.write_text(text.replace(old, fixed))
+
+
 def patch_metalfx_compatibility(root):
     path = root/'dm/gfx/nvn/nvn_mtl.m'
     if not path.exists(): return
@@ -131,6 +146,7 @@ def sync(checkout, target):
             if (checkout/rel).stat().st_mode & 0o111: dest.chmod(0o755)
         patch_controller(stage)
         patch_sdk_compatibility(stage)
+        patch_ci_compatibility(stage)
         record = dict(schema=1, repository=UPSTREAM, revision=sha,
                       controllerPatch=hashlib.sha256((ROOT/'scripts/patches/controller_native.h').read_bytes()).hexdigest(), files=inventory(stage))
         (stage/'manifest.json').write_text(json.dumps(record, indent=2, sort_keys=True)+'\n')
