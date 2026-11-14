@@ -248,6 +248,14 @@ To enroll a cut for any game's own module:
 - **Found on:** [Ace Attorney Investigations Collection](../../dm/games/010005501E68C000/README.md) (Unity 2022.3 IL2CPP): `main+0x1d271bc` and `+0x204ebec`.
 - **Check:** every module the rewriter accepted before comes out byte-identical.
 
+### Compare and swap of a register pair that is x18, x19
+
+- **Symptom:** `RuntimeError: subst fail <addr> caspal x18, x19, x4, x5, [x16]` in `patch_nso.py` (`subst`, from `site_plain`).
+- **Cause:** `casp`, `caspa`, `caspl` and `caspal` take the compare pair (Rs) and the new-value pair (Rt) as an even register and the next one. `subst` renames `x18` alone, and `xS, x19` is no pair, so no encoding disassembles as the original with `x18` replaced.
+- **Fix:** `site_casp`, chosen by `casp_pair18` (the encoding, either pair at `x18`) before `site_plain`, moves the pair to a free even pair `P, P + 1`: `P` is loaded from the slot K18 and `P + 1` copied from `x19`, and the instruction runs with the pair renamed. The instruction writes the compare pair with the memory's old value, so for a compare pair `P` then goes back to the slot and `P + 1` to `x19`; a new-value pair is only read. The memory access is still the one instruction, so it stays atomic. `P`, `P + 1` and the slot address's register are saved below `sp` and restored. A base register `x18` is a single field, which `subst` renames as before.
+- **Found on:** [Sonic Frontiers Definitive Edition](../../dm/games/0400921025B32000/README.md) `main+0x19ce5c4`, in a 128-bit compare and swap loop: the only one of the 18,315 `x18` sites in `main` that `subst` cannot rename.
+- **Check:** `test_x18_casp.py` checks that no block names `x18` and keeps one `casp`, and runs the blocks with unicorn (optional): a swap that succeeds and one that fails with the compare pair at `x18`, a new-value pair at `x18`, and a 32-bit pair, whose writes clear the upper halves. A module without such an instruction takes no new path: the rewriter stopped on every one before.
+
 ### Unframed pointer tail calls followed by zero trap padding
 
 - **Symptom:** `AssertionError: jump table d29e68` while rewriting Moving Out 2 1.3.315.
@@ -352,8 +360,15 @@ To enroll a cut for any game's own module:
 
 - **Symptom:** a `B()` range assertion in `site_plain` on the branch back to the site, in a module that takes two patch areas.
 - **Cause:** `SPLIT` only kept the front area in reach. The back area sits after ro, data and bss, so when those are large it is more than 128 MB from the sites just above a split set by a 16 MB front area: here `SPLIT` was `0x6f00000` and the back area at `0xfa40000` reaches down to `0x7a40000`.
-- **Fix:** `SPLIT` is also no lower than `BACK_MIN`, `BACK_OFF` less the reach plus the same 1 MB of margin. When that lifts it, the front area's first pass takes the gap up to `BACK_MIN` instead of 16 MB, so the front area still reaches every site below the split; the rerun with exactly the size its sites need works as before, and `B()` checks every branch. A module whose back area already reaches the 16 MB split (EA SPORTS FC 27) is rewritten byte for byte as before; one where no split reaches stops with a message naming `BACK_MIN`.
+- **Fix:** `SPLIT` is also no lower than `BACK_MIN`, `BACK_OFF` less the reach plus the same 1 MB of margin. When that lifts it, the front area's first pass takes the gap up to `BACK_MIN` instead of 16 MB, so the front area still reaches every site below the split; the rerun with exactly the size its sites need works as before, and `B()` checks every branch. A module whose back area already reaches the 16 MB split (EA SPORTS FC 27) is rewritten byte for byte as before; one where no split reaches takes [hops](#hops-for-sites-neither-patch-area-reaches).
 - **Found on:** Hello Kitty Party Land `main` (1.0.2): 151.8 MB of text and 98 MB of ro, data and bss after it; `SPLIT` `0x7b40000`, 1.7 MB of stubs in a 3.75 MB front area (no rerun) and 123 KB at `BACK_OFF` `0xfa40000`.
+
+### Hops for sites neither patch area reaches
+
+- **Symptom:** `AssertionError: no split reaches: the back patch area reaches no site below 0x9480000, too close to the front area's reach` in `patch_nso.py`, before any site is rewritten.
+- **Cause:** 185 MB of text and 90 MB of ro, data and bss after it. The front area before the base reaches sites up to about 127 MB, the back area after bss (`BACK_OFF` `0x11380000`) sites from 148.5 MB (`BACK_MIN`), and the 21 MB of text between them (1,190 x18 sites and 669 `mrs tpidr_el0`) has no executable memory within ±128 MB that is not the module itself: no place for a patch area reaches them.
+- **Fix:** a branch between the code and a patch area that a `b` does not reach goes through a hop (`reach_via`, `BX`): a `b` written into a word of the text that no path runs, within reach of both ends, as a linker's range extension thunk does. Those words are the alignment padding before functions: nop or zero words right before an unwind entry's start, after a `b`, `br`, `ret` or `brk`, and fewer bytes of them than the start's alignment. One hop serves every branch to its target that it reaches. With `GAP` (`BACK_MIN` past the front area's reach) the front area keeps its 16 MB and its split, and the sites from the split to `BACK_MIN` take the back area through hops. Every branch into a stub (`put_branch`) and every branch from a stub back to the code goes through `BX`, which is a plain `b` whenever that reaches, so every module that rewrote before is rewritten byte for byte as before (Stardew Valley and Minecraft Dungeons II with their area right before the base, Metroid Dread with its area before the base, Hollow Knight: Silksong's `main` and `sdk`: identical but for `build_src.sha256`).
+- **Found on:** [Resident Evil 4](../../dm/games/0400569027BF4000/README.md) `main` (v131072): 5,647 hops in 600,000 padding words, 0.76 MB of stubs in front and 1.25 MB at `BACK_OFF`; no direct branch, conditional branch or `adr` of the original text lands on a hop.
 
 ## Cuts and observation gates
 

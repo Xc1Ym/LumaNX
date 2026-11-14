@@ -240,6 +240,13 @@ const void *own_live_ref(uint64_t k) { pthread_mutex_lock(&g_smu); const void *o
 void serial_put(uint64_t k, id o) { pthread_mutex_lock(&g_smu); id old = hm_get_id(&g_by_serial, &k); if (old) { held_add((__bridge void *)old, -1); obj_drop(old); } hm_put_id(&g_by_serial, &k, o); held_add((__bridge void *)o, 1); own_note(k); pthread_mutex_unlock(&g_smu); }
 static void live_del_locked(uint64_t k) { id old = hm_get_id(&g_by_serial, &k); if (old) { held_add((__bridge void *)old, -1); obj_drop(old); hm_del_id(&g_by_serial, &k); own_note(k); } }   // nothing to drop: the texture
 void serial_del(uint64_t k) { pthread_mutex_lock(&g_smu); live_del_locked(k); pthread_mutex_unlock(&g_smu); }
+id own_ext_take(uint64_t k) {   // not retired through the deferred-release queue, which only NVN submissions drain: the present path retires it (mtl_ext_tex_release)
+    pthread_mutex_lock(&g_smu);
+    void *v = nvn_hm_del(&g_by_serial, &k); id o = v ? CFBridgingRelease(v) : nil;
+    if (o) { held_add((__bridge void *)o, -1); own_note(k); }
+    pthread_mutex_unlock(&g_smu);
+    return o;
+}
 
 void own_tex_live_put_locked(const tex_t *t) { nvn_hm_put(&g_tex_live, &t->serial, (void *)t); }
 int own_tex_live_locked(uint64_t serial) { return nvn_hm_get(&g_tex_live, &serial) != NULL; }
@@ -295,6 +302,8 @@ static void ghost_used(uint64_t k) {   // a lookup or a put of k's ghost entry: 
     u->frame = own_hook_frame(); u->sub = own_hook_submission();
     if (u != g_ghost_mru) { u->prev = g_ghost_mru; if (g_ghost_mru) g_ghost_mru->next = u; else g_ghost_lru = u; g_ghost_mru = u; }
 }
+int own_ghost_has_locked(uint64_t k) { return g_ghost.n && nvn_hm_get(&g_ghost, &k) != NULL; }   // a look, not a use (no ghost_used)
+int own_ghost_has(uint64_t k) { pthread_mutex_lock(&g_smu); int r = own_ghost_has_locked(k); pthread_mutex_unlock(&g_smu); return r; }
 static void ghost_del_locked(uint64_t k) {   // k's ghost entry goes with its place in the list; the serial resolves anew (a note)
     ghost_use *u = nvn_hm_del(&g_ghost_use, &k); if (u) { use_unlink(u); free(u); }
     id old = hm_get_id(&g_ghost, &k); if (!old) return;
