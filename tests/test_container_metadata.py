@@ -203,8 +203,9 @@ class ContainerSelectionTests(unittest.TestCase):
             up=importlib.util.module_from_spec(spec);spec.loader.exec_module(up)
             up.PROG=up.Progress('off');up.run=build.container_runner(c,game)
             extract_args=dict(nx=reader,keys=root/'synthetic.keys',ex=root/'extract',name='v0',base=source,upd=None,
-                              logs=logs,g={'romfs_marker':'marker'},app=int(TITLE,16))
+                              logs=logs,app=int(TITLE,16))
             parameters=inspect.signature(up.extract).parameters
+            if 'g' in parameters: extract_args['g']={'romfs_marker':'marker'}
             if 'cmp_dir' in parameters: extract_args['cmp_dir']=None
             if 'repo' in parameters: extract_args['repo']=repo
             up.extract(**extract_args)
