@@ -92,9 +92,14 @@ const char *dm_cheats_source(int i) {(void)i;abort();}
 // above; the host's own tests cover sensor fusion and HID packet decoding.
 void dm_motion_set(int p,const float acc[3],const float rot[3]) {(void)p;(void)acc;(void)rot;}
 void dm_motion_set_hid(int p,const float acc[3],const float rot[3],uint64_t ns) {(void)p;(void)acc;(void)rot;(void)ns;}
-static unsigned motion_clears[DM_PLAYERS], hid_motion_clears[DM_PLAYERS];
+void dm_joy_attach(int p,uint32_t sides) {assert(p>=0&&p<DM_PLAYERS);(void)sides;}
+void dm_motion_set_joy(int p,int side,const float acc[3],const float rot[3],uint64_t ns) {
+    assert(p>=0&&p<DM_PLAYERS&&side>=0&&side<2);(void)acc;(void)rot;(void)ns;
+}
+static unsigned motion_clears[DM_PLAYERS], hid_motion_clears[DM_PLAYERS], joy_motion_clears[DM_PLAYERS][2];
 void dm_motion_clear(int p) {assert(p>=0&&p<DM_PLAYERS);motion_clears[p]++;}
 void dm_motion_clear_hid(int p) {assert(p>=0&&p<DM_PLAYERS);hid_motion_clears[p]++;}
+void dm_motion_clear_joy(int p,int side) {assert(p>=0&&p<DM_PLAYERS&&side>=0&&side<2);joy_motion_clears[p][side]++;}
 uint64_t now_ns(void) {
     struct timespec t;assert(clock_gettime(CLOCK_MONOTONIC_RAW,&t)==0);
     return (uint64_t)t.tv_sec*1000000000ull+(uint64_t)t.tv_nsec;
