@@ -31,6 +31,27 @@
 #define DMSH_C0_SSBO_MS 0x770            // NVN2 mesh stage storage buffer table: its mesh shaders read c0 0x770, 0x780, 0x790 and 0x7b0, and it binds slots from 0
 #define DMSH_MESH_DRAW_SLOT 29           // a task or object function's buffer: the draw's {count, first} workgroups, NVN's DrawMeshTasksIndirect record (dmsh_meshstage.py, nvn_geometry.inc mtk_encode)
 #define DMSH_MESH_GRID 1024              // Metal's limit of threadgroups in a mesh grid: a mesh shader with no task shader is drawn by an object function launching blocks of this many (dmsh_meshstage.py)
+// A mesh function whose stage array is 6000 to 16384 bytes (a 32-thread group; dmsh_meshstage.py to_stage, reflection key mesh_spill) keeps it in a device slice, not in threadgroup memory:
+// buffer DMSH_MESH_SCRATCH_SLOT of the mesh stage, which shares the vertex argument table. A mesh draw binds slot 0 (the arguments) and this one; vertex draws use the others (1-12
+// converted streams, 8-11 transform feedback, 12-13 geometry, 14-29 streams, 30 the zero buffer) and rebind what they read, as nvn_mtl.m enc_r_vbuf tracks every write.
+// The buffer (shared storage, nvn_geometry.inc mesh_scratch) is DMSH_MESH_SCRATCH_HEAD bytes of 32-bit words and then a power-of-two count of slices of DMSH_MESH_SCRATCH_STRIDE bytes, at most
+// DMSH_MESH_SCRATCH_SLICES. Head words: _TICKET the groups' ticket counter (any start value); _MASK the slice count - 1 (the host's); _TAG at least the fence of every submission the GPU runs that
+// draws a spilled mesh, written before its commit; _DONE the last fence whose submission completed, failed ones too (the host's post_complete); _OVER the groups that found no slice. From byte
+// _FLAGS a word a slice: 0 free, else its owner's tag. Lane 0 takes a ticket and claims the slice at ticket & mask when its flag is 0 or a tag no newer than _DONE (a group a failed submission
+// cut off: its submission is over, so it runs no more), compare-and-swap to its own tag; up to DMSH_MESH_SCRATCH_TRIES tickets. The group clears the flag after its last read behind a
+// device-scope fence, so a slice is handed out again only once its group finished, however long it ran and however many groups started meanwhile. A group that claims none adds 1 to
+// _OVER and draws nothing, never touching a slice it does not own; the host reports it. Tags compare by their signed 32-bit difference (fences 2^31 apart do not meet in a slice).
+#define DMSH_MESH_SCRATCH_SLOT 7
+#define DMSH_MESH_SCRATCH_TICKET 0
+#define DMSH_MESH_SCRATCH_MASK 1
+#define DMSH_MESH_SCRATCH_TAG 2
+#define DMSH_MESH_SCRATCH_DONE 3
+#define DMSH_MESH_SCRATCH_OVER 4
+#define DMSH_MESH_SCRATCH_FLAGS 64
+#define DMSH_MESH_SCRATCH_SLICES 16384
+#define DMSH_MESH_SCRATCH_HEAD 65600
+#define DMSH_MESH_SCRATCH_STRIDE 16384
+#define DMSH_MESH_SCRATCH_TRIES 64
 #define DMSH_C0_DISPATCH 0x200           // compute: the dispatch's workgroup counts x, y, z (32 bits each; Link's Awakening's light culling)
 #define DMSH_C0_DISPATCH_NVN2 4          // NVN2 compute keeps them here, below its per-shader layout at 0x10 (x and y read by Fire Emblem Fortune's Weave's light culling; z by their order)
 #define DMSH_C0_CS_UBO 0x210             // compute: uniform slot r's address and size at 0x210 + 0x10 r, read through global memory (the build's ubo_ptr bindings); it ends where the storage buffer table starts
@@ -59,6 +80,12 @@
 // as long as its entries (the TBIAS binding's "n")
 #define DMSH_TBIAS_BANK 26
 #define DMSH_TBIAS_SLOTS 512             // the most entries a table holds, a u32 each, as uint4s (a binding's entry: its "tbx"; an array's first element's)
+// Storage bounds: a storage buffer whose address the shader takes from a game uniform slot or the push constants (SBUFU, SBUFQ) has no size, and on the console the shader reads the GPU's
+// page table as far as it indexes, an unmapped page reading 0. Its accesses are compared with the memory the host bound there (Ryujinx TranslationFlags.MetalStorageBounds): out of it a
+// load gives 0 and a store or an atomic is dropped. The host gives each such binding two u32 in a table in a bank of its own (Ryujinx Constants.NxStorageLengthsBank): the words readable
+// before the address B, then B plus the words from it on, at u32 2s and 2s + 1 for the binding's storage slot s (its "sbx"); only a shader with such a buffer has the table (GitHub issue #2618)
+#define DMSH_SBLEN_BANK 27
+#define DMSH_SBLEN_SLOTS 32              // storage slots of a table, two u32 each, as uint4s: 256 bytes
 // The push call's word before the offset names a block of the stage group; c[24] holds block b at b * DMSH_PUSH_SIZE. Block 0 holds the group's constants. Block 1 + i holds
 // stage i's buffer entries: compute has one stage and reads block 1 where its c0 layout counts it (control +0xaa, in words, right after block 0's +0xa9; the translator maps it
 // to c[24] + DMSH_PUSH_SIZE); graphics stage i reads its block through its own bank (DMSH_NVN2_STAGE_BANK + i), up to the pixel stage's block 5. PRAGMATA pushes 16-byte buffer
@@ -76,11 +103,12 @@
 #define DMSH_KIND_DRVCB "drvcb"          // a driver segment, c[bank] (bank 0 or 2): NVN_RB_DRV0 / NVN_RB_DRV2
 #define DMSH_KIND_CBSIZE "cbsize"        // the uniform slots' bound sizes, c[DMSH_CBSIZE_BANK]: NVN_RB_CBSIZE
 #define DMSH_KIND_TBIAS "tbias"          // the buffer images' element offsets, c[DMSH_TBIAS_BANK]: NVN_RB_TBIAS
+#define DMSH_KIND_SBLEN "sblen"          // the bounded storage buffers' lengths, c[DMSH_SBLEN_BANK]: NVN_RB_SBLEN
 #define DMSH_KIND_SUPPORT "support"      // the translator's support buffer
 #define DMSH_KIND_GEOMETRY "geometry"    // one of the geometry lowering's helper buffers, reg = its index (dmsh_geometry.py HELPERS)
 #define DMSH_KIND_SBUF "sbuf"            // storage buffer slot reg, its address in the stage's c0 table; rw = the shader writes it
 #define DMSH_KIND_SBUF_UBO "sbuf_ubo"    // a storage buffer whose address the game keeps in its own uniform slot reg at byte off
-#define DMSH_KIND_SBUF_PUSH "sbuf_push"  // a storage buffer whose address the game pushed: c[24] (both push blocks, DMSH_PUSH_BLOCKS) at byte off
+#define DMSH_KIND_SBUF_PUSH "sbuf_push"  // a storage buffer whose address the game pushed: c[24] (both push blocks, DMSH_PUSH_BLOCKS) at byte off. Both kinds: sbx = its slot in the length table (DMSH_SBLEN_BANK), if bounded
 #define DMSH_KIND_UBO_PTR "ubo_ptr"      // compute: uniform slot reg read through its address in c0 (DMSH_C0_CS_UBO)
 #define DMSH_KIND_TEX "tex"              // texture slot reg (combined, or DMSH_SEPTEX_SLOT0 + r for a separate texture)
 #define DMSH_KIND_TBUF "tbuf"            // a buffer texture in texture slot reg

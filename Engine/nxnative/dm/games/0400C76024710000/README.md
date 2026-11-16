@@ -36,6 +36,7 @@ Measured on the M4 Pro, in a 1920x1080 window: 60 fps at the title, 44 to 52 fps
 - [More than 1,024 mapped runs in a sparse pool](../../../docs/reference/nvn-objects.md#more-than-1024-mapped-runs-in-a-sparse-pool): the GPU hang 3 to 4 minutes into the intro.
 - [Pages changed under a buffer the GPU still uses](../../../docs/reference/nvn-objects.md#pages-changed-under-a-buffer-the-gpu-still-uses): absurd indirect dispatches and a hang while it maps and unmaps sparse pages.
 - [A sparse pool's runs replaced in two steps](../../../docs/reference/nvn-objects.md#a-sparse-pools-runs-replaced-in-two-steps): mesh shaders `765e6d9d2588ce70` and `5aab38bb5ba67ef7` bound to a dummy buffer for a frame.
+- [A sparse pool's streamed textures read 0 at their first read](../../../docs/reference/rendering.md#a-sparse-pools-streamed-textures-read-0-at-their-first-read): a dark frame at the cut from the tower to the tablet.
 - [Queue builder size getters](../../../docs/reference/nvn-objects.md#queue-builder-size-getters): read after `SetDefaults` as it makes its queue.
 - [Float blend clamp](../../../docs/reference/nvn-objects.md#float-blend-clamp-nvncommandbuffersetfloatblendclamp): it sets 1.
 - [A sync never fenced since its Initialize is signalled](../../../docs/reference/nvn-objects.md#a-sync-never-fenced-since-its-initialize-is-signalled).
@@ -70,6 +71,7 @@ Measured on the M4 Pro, in a 1920x1080 window: 60 fps at the title, 44 to 52 fps
 - [Ampere forms met on PRAGMATA](../../../docs/reference/shaders.md#ampere-forms-met-on-pragmata-tld-through-a-uniform-register-i2f-of-an-immediate-suatomcas): 21 shaders.
 - [Subgroup operations rewritten for a one-lane subgroup](../../../docs/reference/shaders.md#subgroup-operations-rewritten-for-a-one-lane-subgroup): two domain shaders.
 - [A base the GPU compiler cannot encode cost the whole offline archive](../../../docs/reference/shaders.md#a-base-the-gpu-compiler-cannot-encode-cost-the-whole-offline-archive): three bases with pixel shader `c4ac3ca598cea32e`.
+- [Reads past a storage buffer bound by address](../../../docs/reference/shaders.md#reads-past-a-storage-buffer-bound-by-address): the colour wash in the R53 hangar ([GitHub issue #2618](https://github.com/seedds/nxnative/issues/2618)). The GI voxeliser `ef4ad01151918469` read past the one run mapped at the base of a sparse pool; its reads past the bound memory now give 0. Open: the hangar retest (no save near it here).
 - [IPA at an offset, and the barycentric coordinates](../../../docs/reference/shaders.md#ipa-at-an-offset-and-the-barycentric-coordinates): pixel shader `4a9d4507eea6c837` did not translate; NVN2's sample position table is signed from the pixel centre.
 
 ## Open
