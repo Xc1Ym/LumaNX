@@ -107,6 +107,17 @@ class EngineSyncTests(unittest.TestCase):
         patch_ci_compatibility(self.target);self.assertEqual(imported.read_text(),text)
         verify_bundle(self.target)
 
+    def test_save_sync_host_test_accepts_upstream_dynamic_device_name(self):
+        path=self.source/'dm/host/tests/t_save_sync.c';path.parent.mkdir(parents=True,exist_ok=True)
+        text=('snprintf(want, sizeof want, "cdevice=%s ", model);\n'
+              'CHECK(REPORT(R2, cloud4) && strstr(line, "conflict=1") && strstr(line, "cfiles=1 ") && strstr(line, want),\n'
+              '      "both changed: the report says conflict, with the cloud\'s device (%s)", line);\n')
+        path.write_text(text);self.commit();sync(self.source,self.target)
+        imported=self.target/'dm/host/tests/t_save_sync.c'
+        self.assertEqual(imported.read_text(),text)
+        patch_ci_compatibility(self.target);self.assertEqual(imported.read_text(),text)
+        verify_bundle(self.target)
+
     def test_save_sync_host_test_drift_preserves_previous_snapshot(self):
         sync(self.source,self.target);before=inventory(self.target)
         path=self.source/'dm/host/tests/t_save_sync.c';path.parent.mkdir(parents=True,exist_ok=True)
@@ -162,30 +173,39 @@ class EngineSyncTests(unittest.TestCase):
                     input=source,text=True,capture_output=True)
                 self.assertEqual(result.returncode,0,result.stderr)
 
-    def metalfx_source(self, deferred=False):
+    def metalfx_source(self, deferred=False, reactive=False):
         base='a.base' if deferred else 'c->base'
         indent='        ' if deferred else '    '
         assignments='\n'.join(f'{indent}    sc.{name} = (NSUInteger){base}[{kind}][{axis}];'
-            for kind,prefix in [('DLSS_COLOR','colorContentOffset'),('DLSS_DEPTH','depthContentOffset'),('DLSS_MOTION','motionContentOffset'),('DLSS_OUTPUT','outputOffset')]
+            for kind,prefix in [('DLSS_COLOR','colorContentOffset'),('DLSS_DEPTH','depthContentOffset'),('DLSS_MOTION','motionContentOffset')]
             for axis,name in enumerate([prefix+'X',prefix+'Y']))
+        if reactive:
+            assignments+=f'\n{indent}    if (bias) {{ sc.reactiveMaskContentOffsetX = (NSUInteger){base}[DLSS_BIAS][0]; sc.reactiveMaskContentOffsetY = (NSUInteger){base}[DLSS_BIAS][1]; }}'
+        assignments+='\n'+'\n'.join(f'{indent}    sc.{name} = (NSUInteger){base}[DLSS_OUTPUT][{axis}];'
+            for axis,name in enumerate(['outputOffsetX','outputOffsetY']))
         path=self.source/'dm/gfx/nvn/nvn_mtl.m';path.parent.mkdir(parents=True,exist_ok=True)
         available='if (@available(macOS 27.0, iOS 27.0, *)) {'
         warning='if (c->base[DLSS_COLOR][0] || c->base[DLSS_OUTPUT][1]) {\n        MLOG("nonzero origin");\n    }\n'
         block=indent+available+'   // SDK 27 offsets\n'+assignments+'\n'+indent+'}'
+        availability='if (@available(macOS 27.0, iOS 27.0, *))'
+        usage=('    if (bias) {\n        MTLTextureUsage u;\n        '+availability+' u = sc.reactiveMaskTextureUsage;\n'
+               '#pragma clang diagnostic push\n#pragma clang diagnostic ignored "-Wdeprecated-declarations"\n'
+               '        else u = sc.reactiveTextureUsage;\n#pragma clang diagnostic pop\n    }\n') if reactive else ''
         if deferred:
-            path.write_text('    '+available+'} else '+warning+
+            path.write_text(usage+'    '+available+'} else '+warning+
                             '    const struct C a = *c;\n    void (^encode)(void) = ^{\n'+block+'\n    };\n    encode();\n')
         else:
-            path.write_text(block+' else '+warning)
+            path.write_text(usage+block+' else '+warning)
         return path
 
     @unittest.skipUnless(sys.platform=='darwin','SDK compilation needs Apple clang')
     def test_metalfx_offsets_compile_on_old_and_new_mac_and_ios_sdks(self):
-        self.check_metalfx_compilation(deferred=False)
-        self.check_metalfx_compilation(deferred=True)
+        self.check_metalfx_compilation(deferred=False,reactive=False)
+        self.check_metalfx_compilation(deferred=True,reactive=False)
+        self.check_metalfx_compilation(deferred=True,reactive=True)
 
-    def check_metalfx_compilation(self, deferred):
-        path=self.metalfx_source(deferred);original=path.read_text();patch_sdk_compatibility(self.source)
+    def check_metalfx_compilation(self, deferred, reactive):
+        path=self.metalfx_source(deferred,reactive);original=path.read_text();patch_sdk_compatibility(self.source)
         guarded=path.read_text();patch_sdk_compatibility(self.source)
         self.assertEqual(path.read_text(),guarded)
         self.assertIn('#endif\n    if (c->base[DLSS_COLOR][0]',guarded)
@@ -194,10 +214,12 @@ class EngineSyncTests(unittest.TestCase):
             for sdk in (260600,270000):
                 with self.subTest(target=target,sdk=sdk,deferred=deferred):
                     names=['colorContentOffsetX','colorContentOffsetY','depthContentOffsetX','depthContentOffsetY','motionContentOffsetX','motionContentOffsetY','outputOffsetX','outputOffsetY']
+                    if reactive:names+=['reactiveMaskContentOffsetX','reactiveMaskContentOffsetY','reactiveMaskTextureUsage']
                     declarations=''.join('@property unsigned long '+name+';\n' for name in names) if sdk>=270000 else ''
+                    declarations+=('@property unsigned long reactiveTextureUsage;\n' if reactive else '')
                     prefix=(f'#define {macro} {sdk}\n#define MLOG(...) ((void)0)\n'
-                        'typedef unsigned long NSUInteger; enum {DLSS_COLOR,DLSS_DEPTH,DLSS_MOTION,DLSS_OUTPUT};\n'
-                        'struct C {int base[4][2];};\n@protocol Scaler\n'+declarations+'@end\nvoid run(id<Scaler> sc,struct C *c) {\n')
+                        'typedef unsigned long NSUInteger, MTLTextureUsage; enum {DLSS_COLOR,DLSS_DEPTH,DLSS_MOTION,DLSS_BIAS,DLSS_OUTPUT};\n'
+                        'struct C {int base[5][2];};\n@protocol Scaler\n'+declarations+'@end\nvoid run(id<Scaler> sc,struct C *c) { int bias=1;\n')
                     command=['xcrun','clang','-target',target,'-x','objective-c','-fblocks','-fsyntax-only','-']
                     result=subprocess.run(command,input=prefix+guarded+'}\n',text=True,capture_output=True)
                     self.assertEqual(result.returncode,0,result.stderr)

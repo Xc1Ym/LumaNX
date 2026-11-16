@@ -70,7 +70,9 @@ def patch_ci_compatibility(root):
     if scenario not in text: return
     old = 'strstr(line, "conflict=1") && strstr(line, "cfiles=1 ") && strstr(line, "cdevice=Mac")'
     fixed = 'strstr(line, "conflict=1") && strstr(line, "cfiles=1 ") && strstr(line, "cdevice=") && !strstr(line, "cdevice=- ")'
-    if fixed in text: return
+    upstream_model = 'snprintf(want, sizeof want, "cdevice=%s ", model);'
+    upstream_fixed = 'strstr(line, "conflict=1") && strstr(line, "cfiles=1 ") && strstr(line, want)'
+    if fixed in text or (upstream_model in text and upstream_fixed in text): return
     if text.count(old) != 1:
         raise RuntimeError('Upstream save-sync CI interface changed: '+str(path))
     path.write_text(text.replace(old, fixed))
@@ -88,37 +90,59 @@ def patch_metalfx_compatibility(root):
     # Runtime availability alone cannot hide properties absent from SDK 26.
     properties = ('colorContentOffsetX', 'colorContentOffsetY', 'depthContentOffsetX', 'depthContentOffsetY',
                   'motionContentOffsetX', 'motionContentOffsetY', 'outputOffsetX', 'outputOffsetY')
+    reactive = ('reactiveMaskContentOffsetX', 'reactiveMaskContentOffsetY')
     # The offsets may be assigned immediately or inside rec_cb_block from a
     # captured value. Match the complete assignment block, not its comment or
     # a closing brace elsewhere in the renderer.
     blocks = list(re.finditer(r'(?m)^(?P<indent> +)'+re.escape(available)+
-                             r'[^\n]*\n(?P<body>(?:[^\n]*\n)*?)(?P=indent)\}', text))
+                             r'[ \t]*(?://[^\n]*)?\n(?P<body>(?:[^\n]*\n)*?)(?P=indent)\}', text))
     blocks = [block for block in blocks if 'sc.colorContentOffsetX' in block['body']]
-    if len(blocks) != 1 or any(text.count('sc.'+p) != 1 for p in properties):
+    reactive_counts = [text.count('sc.'+p) for p in reactive]
+    if len(blocks) != 1 or any(text.count('sc.'+p) != 1 for p in properties) or reactive_counts not in ([0, 0], [1, 1]):
         raise RuntimeError('Upstream MetalFX offset interface changed: '+str(path))
     block = blocks[0]
     assignments = ''.join(block['body'].split())
-    expected = [''.join(f'sc.{prop}=(NSUInteger){base}[{kind}][{axis}];'
-                       for (kind, prefix) in (('DLSS_COLOR', 'colorContentOffset'), ('DLSS_DEPTH', 'depthContentOffset'),
-                                              ('DLSS_MOTION', 'motionContentOffset'), ('DLSS_OUTPUT', 'outputOffset'))
-                       for axis, prop in enumerate((prefix+'X', prefix+'Y')))
-                for base in ('c->base', 'a.base')]
+    def expected_assignments(base):
+        result = ''.join(f'sc.{prop}=(NSUInteger){base}[{kind}][{axis}];'
+                         for (kind, prefix) in (('DLSS_COLOR', 'colorContentOffset'), ('DLSS_DEPTH', 'depthContentOffset'),
+                                                ('DLSS_MOTION', 'motionContentOffset'))
+                         for axis, prop in enumerate((prefix+'X', prefix+'Y')))
+        if reactive_counts == [1, 1]:
+            result += ('if(bias){sc.reactiveMaskContentOffsetX=(NSUInteger)'+base+'[DLSS_BIAS][0];'
+                       'sc.reactiveMaskContentOffsetY=(NSUInteger)'+base+'[DLSS_BIAS][1];}')
+        return result + ''.join(f'sc.{prop}=(NSUInteger){base}[DLSS_OUTPUT][{axis}];'
+                                for axis, prop in enumerate(('outputOffsetX', 'outputOffsetY')))
+    expected = [expected_assignments(base) for base in ('c->base', 'a.base')]
     tail = text[block.end():]
     legacy = tail.startswith(' else '+warning)
     deferred_warning = '    '+available+'} else '+warning
-    if assignments in expected and text[:block.start()].endswith(guard+'\n') and (
-            tail.startswith(' else\n#endif\n'+block['indent']+warning) or tail.startswith('\n#endif\n')):
-        return
-    if assignments not in expected or (not legacy and text.count(deferred_warning) != 1):
-        raise RuntimeError('Upstream MetalFX offset interface changed: '+str(path))
-    if legacy:
-        tail = ' else\n#endif\n'+block['indent']+tail[len(' else '):]
-    else:
-        tail = '\n#endif'+tail
-    text = text[:block.start()]+guard+'\n'+block[0]+tail
-    if not legacy:
-        # An SDK 26 build cannot set offsets even on OS 27, so keep warning there.
-        text = text.replace(deferred_warning, guard+'\n    '+available+'} else\n#endif\n    '+warning)
+    guarded = assignments in expected and text[:block.start()].endswith(guard+'\n') and (
+        tail.startswith(' else\n#endif\n'+block['indent']+warning) or tail.startswith('\n#endif\n'))
+    if not guarded:
+        if assignments not in expected or (not legacy and text.count(deferred_warning) != 1):
+            raise RuntimeError('Upstream MetalFX offset interface changed: '+str(path))
+        if legacy:
+            tail = ' else\n#endif\n'+block['indent']+tail[len(' else '):]
+        else:
+            tail = '\n#endif'+tail
+        text = text[:block.start()]+guard+'\n'+block[0]+tail
+        if not legacy:
+            # An SDK 26 build cannot set offsets even on OS 27, so keep warning there.
+            text = text.replace(deferred_warning, guard+'\n    '+available+'} else\n#endif\n    '+warning)
+
+    # The reactive-mask usage spelling is also new in SDK 27. Preserve the
+    # deprecated SDK 26 spelling as the compile-time fallback.
+    availability = 'if (@available(macOS 27.0, iOS 27.0, *))'
+    usage_new = '        '+availability+' u = sc.reactiveMaskTextureUsage;'
+    usage_old = '        else u = sc.reactiveTextureUsage;'
+    usage_guarded = guard+'\n'+usage_new+'\n        else\n#endif'
+    if 'sc.reactiveMaskTextureUsage' in text:
+        if usage_guarded in text and text.count('        u = sc.reactiveTextureUsage;') == 1 and usage_old not in text:
+            pass
+        elif text.count(usage_new) == 1 and text.count(usage_old) == 1 and usage_guarded not in text:
+            text = text.replace(usage_new, usage_guarded).replace(usage_old, '        u = sc.reactiveTextureUsage;')
+        else:
+            raise RuntimeError('Upstream MetalFX reactive-mask interface changed: '+str(path))
     path.write_text(text)
 
 
