@@ -1,15 +1,15 @@
-# LumaNX 0.4.2
+# LumaNX 0.4.3
 
 ## Changes
 
-- **Large engine snapshot update.** The bundled nxnative snapshot moves from upstream [b2d46b86d03f4b03afe11ea61c67cdf00d7a5345](https://github.com/seedds/nxnative/commit/b2d46b86d03f4b03afe11ea61c67cdf00d7a5345) to [38521863e191431f61f6a465eb1aed66078975c0](https://github.com/seedds/nxnative/commit/38521863e191431f61f6a465eb1aed66078975c0), retaining LumaNX's controller and SDK compatibility policy. The update refreshes registered game profiles and brings upstream rendering, shader-pipeline, packing, save-sync, audio/video and runtime fixes. Games should be prepared again after updating so their runtime and shader libraries match the new snapshot.
-- **Graphics and runtime improvements from upstream.** The snapshot includes task/mesh pipeline prewarming, pipeline-archive and texture-residency fixes, broader Switch 2 controller support, and multiple Ocarina of Time rendering/performance fixes. These are upstream changes carried by the bundled engine; LumaNX's release validation covers builds and fixtures, not complete gameplay sessions.
-- **Switch 2 controller test coverage.** The native controller harness now covers the additional HID service calls made by the current Switch 2 controller path, keeping those symbols verified without changing production controller behavior.
-- **Daily engine synchronization repaired.** LumaNX now tolerates both old and new nxnative extraction interfaces, accepts GitHub's `VirtualMac` ARM runner identity in the upstream save-sync fixture, and explicitly disables NativeAOT when rebuilding LumaNX's private metadata-reader adapter. The tested candidate can again pass the complete synchronization pipeline before being committed.
+- **Current nxnative snapshot.** The bundled engine moves from upstream [38521863e191431f61f6a465eb1aed66078975c0](https://github.com/seedds/nxnative/commit/38521863e191431f61f6a465eb1aed66078975c0) to [33c734f61963c6af738e1b79d99fab0930ea3bf3](https://github.com/seedds/nxnative/commit/33c734f61963c6af738e1b79d99fab0930ea3bf3). It carries a broad set of upstream rendering, shader translation, sparse-texture, filesystem, save, audio/video, controller, packaging and game-profile updates. Prepare games again after updating so their runtime, shaders and pipeline archives match the new snapshot.
+- **MetalFX and graphics updates.** Upstream adds reactive-mask input for MetalFX, wider input-size handling, scaler ordering fixes, pipeline-archive reliability improvements and further texture/view/residency corrections. LumaNX's synchronization layer now compile-guards the new SDK 27 reactive-mask properties while retaining the SDK 26 fallback.
+- **Controllers, packing and profiles.** The snapshot adds original Joy-Con motion input on Mac, expands Switch 2 controller handling, reads additional Switch 2 and game shader-library formats, and introduces or refreshes multiple registered profiles. The LumaNX native harness now supplies the matching Joy-Con motion sinks so these interfaces remain link-tested.
+- **Synchronization compatibility.** The daily import accepts nxnative's dynamic save-sync device check and both old and new metadata-extraction signatures. A verified candidate at this exact revision passed the complete Apple Silicon test, build, signing, DMG and relocation pipeline before it was committed.
 
 ## Installation and validation
 
-Download **LumaNX-0.4.2-arm64.dmg** and verify the SHA-256 shown on the GitHub release. Quit the app and active tasks before replacing the application. The application identifier and existing libraries, saves and settings are retained.
+Download **LumaNX-0.4.3-arm64.dmg** and verify the SHA-256 shown on the GitHub release. Quit the app and active tasks before replacing the application. The application identifier and existing libraries, saves and settings are retained.
 
 Requires Apple Silicon and macOS 26+. Uses **ad-hoc signing and is not notarized**. Game preparation requires full Xcode with Metal; IPA export also requires the iOS platform and XcodeGen.
 
@@ -19,12 +19,12 @@ The release workflow runs Python and Swift regression tests, native controller a
 
 ## 中文说明
 
-- **大幅同步引擎快照。** 内置 nxnative 从上游 [b2d46b86d03f4b03afe11ea61c67cdf00d7a5345](https://github.com/seedds/nxnative/commit/b2d46b86d03f4b03afe11ea61c67cdf00d7a5345) 更新至 [38521863e191431f61f6a465eb1aed66078975c0](https://github.com/seedds/nxnative/commit/38521863e191431f61f6a465eb1aed66078975c0)，并保留 LumaNX 的手柄与 SDK 兼容策略。本次更新刷新已登记游戏配置，并带入上游渲染、着色器流水线、打包、存档同步、音视频和运行时修复。升级后应重新准备游戏，使运行时和着色器库与新快照一致。
-- **上游图形与运行时改进。** 新快照包含 task/mesh 流水线预热、流水线归档与纹理驻留修复、更完整的 Switch 2 手柄支持，以及多项《塞尔达传说 时之笛》渲染与性能修复。这些能力来自随包引擎；LumaNX 的发布验证覆盖构建与测试夹具，不等同于完整游戏流程验收。
-- **Switch 2 手柄测试覆盖。** 原生手柄测试桩现已覆盖当前 Switch 2 手柄路径新增的 HID 服务调用，在不改变生产手柄行为的前提下持续验证相关符号。
-- **修复每日引擎同步。** LumaNX 现可同时适配 nxnative 新旧提取接口，允许上游存档同步夹具识别 GitHub ARM runner 的 `VirtualMac` 设备名，并在重建 LumaNX 私有元数据读取适配器时显式关闭 NativeAOT。候选引擎恢复为通过完整同步流水线后才会提交。
+- **当前 nxnative 快照。** 内置引擎从上游 [38521863e191431f61f6a465eb1aed66078975c0](https://github.com/seedds/nxnative/commit/38521863e191431f61f6a465eb1aed66078975c0) 更新至 [33c734f61963c6af738e1b79d99fab0930ea3bf3](https://github.com/seedds/nxnative/commit/33c734f61963c6af738e1b79d99fab0930ea3bf3)，带入大量上游渲染、着色器翻译、稀疏纹理、文件系统、存档、音视频、手柄、打包及游戏配置更新。升级后应重新准备游戏，使运行时、着色器和流水线归档与新快照一致。
+- **MetalFX 与图形更新。** 上游新增 MetalFX 反应遮罩输入、更宽的输入尺寸范围、缩放器排序修复、流水线归档可靠性改进，以及更多纹理/视图/驻留修复。LumaNX 同步层现会对 SDK 27 新增的反应遮罩属性做编译期保护，同时保留 SDK 26 回退路径。
+- **手柄、打包与配置。** 快照新增 Mac 上初代 Joy-Con 体感输入，扩展 Switch 2 手柄处理，读取更多 Switch 2 及游戏着色器库格式，并新增或刷新多个已登记配置。LumaNX 原生测试桩已补齐相应 Joy-Con 体感接口，持续执行链接验证。
+- **同步兼容性。** 每日导入现可识别 nxnative 的动态存档同步设备检查，并同时适配新旧元数据提取签名。精确对应该上游提交的候选产物已在提交前通过完整 Apple Silicon 测试、构建、签名、DMG 与搬移校验。
 
-下载 **LumaNX-0.4.2-arm64.dmg**，按 GitHub Release 页面给出的 SHA-256 校验，退出应用及任务后替换应用。应用标识、现有游戏库、存档与设置保持兼容。
+下载 **LumaNX-0.4.3-arm64.dmg**，按 GitHub Release 页面给出的 SHA-256 校验，退出应用及任务后替换应用。应用标识、现有游戏库、存档与设置保持兼容。
 
 要求 Apple Silicon、macOS 26 及以上；采用临时签名，尚未公证。准备游戏需完整 Xcode 与 Metal，导出 IPA 另需 iOS 平台与 XcodeGen。
 
