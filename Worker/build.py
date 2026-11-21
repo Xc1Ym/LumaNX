@@ -6,6 +6,7 @@ from inspect import signature
 from core import *
 from library import requirements, inspect
 import milestones as ms
+from shader_artifacts import generate_tables, validate_library
 
 class ShaderProgress:
     """Count only finished reflection/library pairs; do not infer progress from queue order."""
@@ -246,7 +247,7 @@ def install(c,root,repo,gp,key,host,romfs,modules,shader,aoc=None,font=None):
         validate_tables(shader,gp,chain)
         for name in ('c1_full.tsv','cb_extent.tsv'): clone(gp.table(name),stage/'profile'/name)
     elif gp.get('graphics','nvn') not in ('vulkan','gl'):
-        c.run([sys.executable,Path(__file__).parent/'c1_generate.py',repo/'dm/gfx/tools/c1_guard.py',stage/'shaders'/('b-'+chain),stage/'profile/c1_full.tsv'],root/'logs/c1.log',c.env(gp.id,root))
+        generate_tables(c,repo,stage/'shaders'/('b-'+chain),lambda name:stage/'profile'/name,root/'logs/c1.log',c.env(gp.id,root))
         if not (stage/'profile/c1_full.tsv').read_text().startswith('# chain b-'+chain+' '): raise Failure('着色器常量表版本不一致。')
     if font: cp(font,'font')
     else:
@@ -295,11 +296,7 @@ def validate_runtime(path,gp=None):
             from types import SimpleNamespace
             from derived import validate_tables
             validate_tables(path/'shaders',SimpleNamespace(id=m['gameId'],table=lambda name:path/'profile'/name),m['chain'])
-        b=path/'shaders'/('b-'+m['chain']); reflected=list(b.glob('*_b.json'))
-        if not reflected: raise Failure('Metal 着色器缓存缺失。')
-        for p in reflected:
-            r=read(p,{})
-            if r.get('chain')!=m['chain'] or not p.with_suffix('.metallib').is_file(): raise Failure('Metal 着色器缓存不完整或版本不一致。')
+        validate_library(path/'shaders',m['chain'])
 
 def build(c,target='macos'):
     with c.lock('execution'), contextlib.ExitStack() as cleanup:

@@ -18,10 +18,10 @@ from core import Context, Failure, Cancelled, atomic, digest
 import build
 import engine
 import ipa
-from engine_fixture import make_engine
+from engine_fixture import make_engine, write_shader_image
 
 
-def archive(path, *, platform='iPhoneOS', resources=True, corrupt=False, image=False):
+def archive(path, *, platform='iPhoneOS', resources=True, corrupt=False, image=False, shader_image=None):
     path.parent.mkdir(parents=True, exist_ok=True)
     with zipfile.ZipFile(path, 'w', compression=zipfile.ZIP_STORED) as z:
         z.writestr('Payload/Fixture.app/Info.plist', plistlib.dumps(dict(
@@ -29,7 +29,10 @@ def archive(path, *, platform='iPhoneOS', resources=True, corrupt=False, image=F
         z.writestr('Payload/Fixture.app/Fixture', b'synthetic executable')
         if resources:
             z.writestr('Payload/Fixture.app/romfs.img' if image else 'Payload/Fixture.app/romfs/marker', b'synthetic resources')
-            z.writestr('Payload/Fixture.app/msl/vk/test.metallib', b'synthetic shader')
+            if shader_image:
+                z.write(shader_image,'Payload/Fixture.app/msl/'+shader_image.name)
+            else:
+                z.writestr('Payload/Fixture.app/msl/vk/test.metallib', b'synthetic shader')
     if corrupt:
         data=path.read_bytes().replace(b'synthetic resources',b'corrupted resources',1)
         path.write_bytes(data)
@@ -169,6 +172,22 @@ class IPATests(unittest.TestCase):
         ipa.validate_shaders(self.shaders,self.gp,self.engine)
         (directory/'key_b.metallib').unlink()
         with self.assertRaises(Failure): ipa.validate_shaders(self.shaders,self.gp,self.engine)
+
+    def test_ios_shader_image_validates_target_and_exports_in_ipa(self):
+        self.graphics='nvn'
+        chain='0123456789ab'
+        (self.engine/'dm/gfx/nvn/dmsh_chain.h').write_text(f'#define DMSH_CHAIN "{chain}"')
+        image=self.shaders/f'b-{chain}.img'
+        files={'key_b.metallib': b'synthetic Metal library'}
+        for sdk in ('macosx', 'iphoneos'):
+            files['key_b.json']=json.dumps(dict(chain=chain,chain_metal=f'xcrun -sdk {sdk} metal')).encode()
+            write_shader_image(image,files)
+            if sdk=='macosx':
+                with self.assertRaises(Failure): ipa.validate_shaders(self.shaders,self.gp,self.engine)
+        ipa.validate_shaders(self.shaders,self.gp,self.engine)
+        output=self.root/'game.ipa'
+        archive(output,shader_image=image)
+        self.quiet(ipa.validate,output,self.c)
 
     def test_mac_and_ios_cache_keys_and_chain_environments_are_separate(self):
         self.g['packages']=[dict(type='base',version=0,sha256='base'),dict(type='update',version=1114112,sha256='update',builds={'main':'fixture-build'})]

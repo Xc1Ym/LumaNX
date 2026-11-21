@@ -3,16 +3,33 @@
 import json
 from pathlib import Path
 import shutil
+import subprocess
 import sys
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT/'Worker'))
 from core import Context, digest
 from engine import prepare
-from bundled_engine import verify_bundle
-from bundled_engine import inventory
+from bundled_engine import inventory, verify_bundle
 from runtime_audit import macho
-import subprocess
+
+TOOL_LOCK = 'dm/gfx/tools/dmsh_chain.lock'
+LOCKED_TOOLS = {
+    'dmsh_xlate': 'dm/gfx/tools/dmsh_xlate_bin/dmsh_xlate',
+    'spirv-cross': 'dm/gfx/tools/spirv_cross_bin/spirv-cross',
+}
+
+
+def locked_shader_hashes(root):
+    lines = (root/TOOL_LOCK).read_text().splitlines()
+    return dict(line.split('\t', 1) for line in lines if '\t' in line and not line.startswith('#'))
+
+
+def verify_shader_tool_lock(root):
+    hashes = locked_shader_hashes(root)
+    for name, rel in LOCKED_TOOLS.items():
+        if hashes.get(name) != digest(root/rel)[:16]:
+            raise ValueError(f'{name} does not match the bundled shader tool lock')
 
 
 def stage_signed_engine(source, output):
@@ -32,6 +49,18 @@ def stage_signed_engine(source, output):
         subprocess.run(['codesign', '--force', '--sign', '-', path], check=True, capture_output=True)
         subprocess.run(['codesign', '--verify', '--strict', path], check=True, capture_output=True)
     if signed:
+        affected = {name: rel for name, rel in LOCKED_TOOLS.items() if rel in signed}
+        if affected:
+            verify_shader_tool_lock(source)
+            lock = output/TOOL_LOCK
+            hashes = {name: digest(output/rel)[:16] for name, rel in affected.items()}
+            lines = lock.read_text().splitlines(keepends=True)
+            for index, line in enumerate(lines):
+                name, _, _ = line.partition('\t')
+                if name in hashes:
+                    lines[index] = f'{name}\t{hashes[name]}\n'
+            lock.write_text(''.join(lines))
+            verify_shader_tool_lock(output)
         record['adHocSignedFiles'] = signed
         record['files'] = inventory(output)
         (output/'manifest.json').write_text(json.dumps(record, indent=2, sort_keys=True)+'\n')

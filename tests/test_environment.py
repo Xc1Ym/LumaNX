@@ -35,8 +35,6 @@ class EnvironmentTests(unittest.TestCase):
         for name in ('Program.cs','dmsh_xlate.csproj'):
             path=shader/'dmsh_xlate'/name;path.parent.mkdir(parents=True,exist_ok=True);path.write_text(name)
         self.sha=hashlib.sha256(b'Program.csdmsh_xlate.csproj').hexdigest()[:16]
-        for name in ('dmsh_xlate.dll','Ryujinx.Graphics.Shader.dll','Ryujinx.Common.dll'):
-            path=shader/'dmsh_xlate_bin'/name;path.parent.mkdir(exist_ok=True);path.write_text('fixture')
         mark_prepared(self.c)
         self.sdk_host=self.root/'dotnet';self.sdk_host.write_text('fixture')
         self.calls=[];self.fail=set()
@@ -91,6 +89,7 @@ class EnvironmentTests(unittest.TestCase):
             return original(c,args,**kw)
         with patch.object(self,'fake_probe',side_effect=outside):self.assertFalse(self.inspect()['内置 Python']['ok'])
         self.sha='wrong source';self.assertFalse(self.inspect()['着色器翻译组件']['ok'])
+        self.fail={'dmsh_xlate'};self.assertFalse(self.inspect()['着色器翻译组件']['ok'])
     def test_missing_manifest_and_dotnet_failure_do_not_abort_other_checks(self):
         (self.c.runtime/'versions.json').write_text('malformed')
         self.fail={'dotnet','nx_extract','spirv-cross','zstd'}
