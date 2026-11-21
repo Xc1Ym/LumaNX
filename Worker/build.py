@@ -375,9 +375,27 @@ def build(c,target='macos'):
                 oodle=oodle_decoder(up,repo,root,env,gp,patched,sources_info)
                 # Keep the old split API for external engines without decoder support.
                 decoder={'oodle':oodle} if oodle else {}
+                installed_dlc=dlc_sources(aoc)
                 if 'dlc_roms' in signature(up.split_shaders).parameters:
-                    decoder['dlc_roms']=dlc_sources(aoc)
+                    decoder['dlc_roms']=installed_dlc
+                # The split scans the installed DLC, so its tables carry the DLC's rows and the comparison with the registered ones fails. The engine's rule for that case: a DLC-only difference derives a shader-only profile, which keeps the registered module builds and settings.
+                if installed_dlc and 'derive_dlc' in signature(up.split_shaders).parameters:
+                    def derive_shader_tables():
+                        nonlocal gp
+                        from derived import module
+                        up.nacp=module(str(repo/'dm/tools/nacp.py'),'lumanx_nacp')
+                        if getattr(up,'pg',None) is None: up.pg=module(str(repo/'dm/games/profile_guess.py'),'lumanx_profile_guess')
+                        folder=root/'profiles'/gp.id
+                        up.derive_profile(gp,folder,gp.get('package'),selected,gp.words('modules'),None,True)
+                        gp=type(gp)(folder)
+                        return gp
+                    decoder['derive_dlc']=derive_shader_tables
+                    if not (root/'profiles'/gp.id).is_dir(): st.saved.pop('提取并核对着色器',None)   # the derived profile holds the DLC's tables: without it the split has to run again
                 st.run('提取并核对着色器',[sh/'pkg'],lambda:up.split_shaders(sys.executable,repo,[romfs_source(d) for d in dirs.values()]+[d/'glslc_capture' for d in dirs.values() if (d/'glslc_capture').exists()],[d/'ExeFS/main' for d in dirs.values()],sh/'pkg',env,logs,gp,**decoder),milestone='extract')
+                derived_profile=root/'profiles'/gp.id
+                if derived_profile.is_dir():   # the derived profile holds the DLC's tables: the build reads the profile from there
+                    env.update(DM_GAMES_DIR=os.pathsep.join([str(derived_profile.parent),env.get('DM_GAMES_DIR','')]),DM_GAMES_FIRST='1')
+                    if gp.dir!=derived_profile: gp=type(gp)(derived_profile)
                 def shaders():
                     up.PROG.stage('iOS shaders' if target=='ios' else 'Mac shaders',poll=ShaderProgress(gp,repo,sh/'ios' if target=='ios' else sh/'cache'))
                     try: c.run([sys.executable,repo/'dm/gfx/tools/dmsh_build.py',sh/'pkg',sh/'cache'],logs/'dmsh_build.log',dict(env,IOSOUT=str(sh/'ios')) if target=='ios' else env)

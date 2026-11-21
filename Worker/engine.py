@@ -79,7 +79,8 @@ def inspect_source(c):
         raw = source_hash(c.engine)
     except (OSError, ValueError, KeyError, SyntaxError) as error:
         raise Failure('所选 nxnative 的构建接口或配置不兼容，请查看环境说明并选择完整的兼容源码。') from error
-    bridge = hashlib.sha256(Path(__file__).read_bytes()+(Path(__file__).parent/'NspMetadata.cs').read_bytes()+(Path(__file__).parent/'derived.py').read_bytes()).hexdigest()
+    # The reader is built from the engine's source and the metadata adapter; a change in the launcher's own code must not make the shipped reader look stale.
+    bridge = hashlib.sha256(Path(__file__).read_bytes()+(Path(__file__).parent/'NspMetadata.cs').read_bytes()).hexdigest()
     fingerprint = ('bundled-' if bundled else 'external-')+hashlib.sha256((raw+bridge).encode()).hexdigest()
     frontend = (c.engine/'dm/host/front_mac.m').read_text()
     header = c.engine/'dm/host/input_config_mac.h'
