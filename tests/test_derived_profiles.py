@@ -107,7 +107,7 @@ class DerivedPipelineTests(unittest.TestCase):
             strategy=dict(mode='derived',version='v65536',versions=['v65536'])
             atomic(work/'identity.json',dict(preparation=strategy,sources=['synthetic']))
             calls=[];attempts=[]
-            def extract(nx,keys,dst,version,base,update,extra,logs,gp):
+            def extract(nx,keys,dst,version,base,update,logs,app,repo):
                 calls.append('extract');self.assertEqual(version,'v65536');self.assertEqual(base,update)
                 (dst/version/'RomFS').mkdir(parents=True);(dst/version/'RomFS/marker').write_text('new')
                 (dst/version/'ExeFS').mkdir();(dst/version/'ExeFS/main').write_text('new code')
@@ -124,9 +124,6 @@ class DerivedPipelineTests(unittest.TestCase):
                 self.assertFalse(gp.table('patches.py').exists());self.assertEqual(gp.get('package'),'v65536')
                 out.mkdir()
                 for ext in ('patched.bin','fixups.tsv','gates.tsv'): (out/('main.'+ext)).write_text('new '+ext)
-            def refine(gp,*args):
-                if gp.get('mem_used') is None: return set_keys(gp,{'mem_used':('42','synthetic')},'refine')
-                return gp
             def split(py,engine,roms,mains,pkg,env,logs,gp,provisional=False,oodle=None):
                 calls.append('split');self.assertTrue(provisional)
                 self.assertEqual(len(roms),1);self.assertIn('v65536',str(roms[0]))
@@ -148,13 +145,13 @@ class DerivedPipelineTests(unittest.TestCase):
                 self.assertNotIn('c1_generate.py',str(args))
                 if str(args[1]).endswith('make_ext_font.py'): Path(args[2]).write_text('font')
             up=SimpleNamespace(extract=extract,derive_profile=derive,set_keys=set_keys,
-                provisional_prep=lambda *a:None,refine_after_rewrite=refine,rewrite=rewrite,
+                provisional_prep=lambda *a:None,rewrite=rewrite,
                 split_shaders=split,build_shaders=shaders)
             old=library_root/'games'/TITLE/'releases/old';old.mkdir(parents=True);(old/'sentinel').write_text('keep')
             current=old.parent.parent/'current';current.symlink_to('releases/old')
             prepared=(work,repo,c.env(),up,Profile(profile),'synthetic')
             def pack(c,root,repo,env,gp,selected,patched,shaders,aoc,up=None):
-                self.assertEqual(gp.get('package'),'v65536');self.assertEqual(gp.get('mem_used'),'42')
+                self.assertEqual(gp.get('package'),'v65536');self.assertIsNone(gp.get('mem_used'))
                 self.assertEqual(env['DM_GAMES_FIRST'],'1');derived.validate_tables(root/'shader/cache',gp,'test')
                 self.assertTrue((shaders/'b-test/new_b.metallib').is_file());return {'outputPath':'synthetic.ipa'}
             with contextlib.redirect_stdout(io.StringIO()),patch.object(sys,'path',list(sys.path)),patch('build.prepare',return_value=prepared),patch.object(c,'nx',return_value=Path('/nx_extract')),patch.object(c,'run',side_effect=run),patch('build.compile_host',side_effect=host),patch('build.shutil.disk_usage',return_value=SimpleNamespace(free=100*2**30)),patch('ipa.package',side_effect=pack):

@@ -28,7 +28,7 @@ class Progress:
     def watch(self,*a): pass
 def event(logs, name):
     with (logs.parent/'events').open('a') as f: f.write(name+'\\n')
-def extract(nx, keys, ex, version, base, update, extra, logs, gp, app):
+def extract(nx, keys, ex, version, base, update, logs, app, repo):
     event(logs,'unpack')
     d=ex/version;(d/'ExeFS').mkdir(parents=True);(d/'RomFS').mkdir()
     code,asset=(update or base).read_text().split('|')

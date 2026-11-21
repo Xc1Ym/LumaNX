@@ -322,9 +322,6 @@ def build(c,target='macos'):
         needed=max(sum(x['size'] for x in sources),g.get('sourceExpandedSize',0))*2+(10 if target=='ios' else 3)*2**30
         if shutil.disk_usage(c.library).free<needed and not st.saved: raise Failure(f'准备游戏需要约 {needed/2**30:.0f} GB 可用空间。')
         dirs={}
-        # Recent upstream requires the selected application for multi-app
-        # containers; older development engines keep the nine-argument API.
-        extraction={'app':int(g['id'],16)} if 'app' in signature(up.extract).parameters else {}
         for index,ver in enumerate(versions):
             upd=next((c.library/x['path'] for x in g['packages'] if x['type']=='update' and f"v{x['version']}"==ver),None)
             d=root/'extract'/ver; dirs[ver]=d
@@ -334,7 +331,7 @@ def build(c,target='macos'):
                 import nup
                 st.run('解包与合并 '+ver,[d],lambda d=d,ver=ver:nup.extract(c,c.library/sources[0]['path'],int(ver[1:]),d),milestone=f'unpack-{index}')
             else:
-                st.run('解包与合并 '+ver,[d],lambda ver=ver,upd=upd: up.extract(c.nx(),c.keys,root/'extract',ver,c.library/base['path'],upd,None,logs,gp,**extraction),milestone=f'unpack-{index}')
+                st.run('解包与合并 '+ver,[d],lambda ver=ver,upd=upd: up.extract(c.nx(),c.keys,root/'extract',ver,c.library/base['path'],upd,logs,int(g['id'],16),repo),milestone=f'unpack-{index}')
         if own:
             import derived
             gp,sources_info=derived.prepare_profile(c,st,up,gp,root,repo,env,dirs[strategy['version']],strategy['version'])
@@ -350,7 +347,7 @@ def build(c,target='macos'):
         patched=root/('patched_'+gp.get('package')); selected=dirs[gp.get('package')]
         st.run('重写原生代码',[patched],lambda:up.rewrite(sys.executable,repo,selected/'ExeFS',patched,env,logs,gp),milestone='rewrite')
         if own:
-            gp=up.refine_after_rewrite(gp,selected,patched);derived.seal_profile(st,gp)
+            derived.seal_profile(st,gp)
             if st.graph: st.graph.profile=gp
             sh=derived.shaders(c,st,up,repo,root,env,gp,selected,patched,dirs,sources_info,target)
         else:
