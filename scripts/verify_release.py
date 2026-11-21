@@ -115,12 +115,14 @@ def verify_runtime_relocation(app):
         subprocess.run(['cp','-cR',str(app),str(moved)],check=True)
         resources=moved/'Contents/Resources'
         private=Path(directory)/'private'
+        from bundle_engine import verify_shader_tool_lock
+        verify_shader_tool_lock(resources/'Engine/nxnative')
         script='''
 import sys,json,hashlib
 from pathlib import Path
 resources=Path(sys.argv[1]);sys.path.insert(0,str(resources/'Worker'))
 from core import Context
-from toolchain import probe
+from toolchain import check_shader_translator, probe
 import capstone,lz4.block,fontTools,zbic
 from compression import zstd
 from fontTools.misc.bezierTools import calcCubicBounds
@@ -142,6 +144,7 @@ assert ok and str(c.runtime/'dotnet/shared/Microsoft.NETCore.App') in dotnet,dot
 assert c.engine == resources/'Engine/nxnative'
 from engine import inspect_source, prepare
 info=inspect_source(c);assert info['nativeControllers']
+ok,digest=check_shader_translator(c);assert ok,digest
 # The packaged reader must prepare offline without an installed SDK.
 import contextlib,io
 with contextlib.redirect_stdout(io.StringIO()):

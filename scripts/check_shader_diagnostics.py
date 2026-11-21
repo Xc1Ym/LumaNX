@@ -12,11 +12,15 @@ import zipfile
 ROOT=Path(__file__).resolve().parents[1]
 sys.path.insert(0,str(ROOT/'Worker'))
 from core import Context, Failure
+from derived import module
 import ipa
+from shader_artifacts import validate_library
 
 
 def main():
     root=ROOT/'work/shader-diagnostics-smoke';root.mkdir(parents=True,exist_ok=True)
+    shader_lib=module(ROOT/'Engine/nxnative/dm/tools/shader_lib.py','smoke_shader_lib')
+    chain='0123456789ab'
     report={}
     for sdk in ('macosx','iphoneos'):
         c=Context(dict(operation='build',privateRoot=str(root/sdk),resources=str(ROOT),
@@ -38,6 +42,10 @@ def main():
                 report[sdk]=dict(compiled=True,errorCode=error.diagnostic['code'],redacted=True)
             else:raise AssertionError('Invalid shader unexpectedly compiled')
         assert library.stat().st_size>0
+        image=c.private/f'b-{chain}.img'
+        shader_lib.write({'fixture_b.metallib':library,
+                          'fixture_b.json':json.dumps(dict(chain=chain,chain_metal=f'xcrun -sdk {sdk} metal')).encode()},str(image))
+        validate_library(c.private,chain,ios=sdk=='iphoneos')
     # Build a small original UIKit app with real Xcode, then validate its IPA
     # structure and CRCs with the production exporter. This is not a game test.
     fixture=root/'ios-app';fixture.mkdir(exist_ok=True)
@@ -81,7 +89,7 @@ schemes:
             for path in sorted(app.rglob('*')):
                 if path.is_file():archive.write(path,'Payload/LumaShaderFixture.app/'+str(path.relative_to(app)))
             archive.writestr('Payload/LumaShaderFixture.app/romfs/fixture.txt','Original synthetic resources')
-            archive.write(library,'Payload/LumaShaderFixture.app/msl/vk/fixture.metallib')
+            archive.write(image,'Payload/LumaShaderFixture.app/msl/'+image.name)
         ipa.validate(output,c)
     report['iosApp']=dict(built=True,unsigned=True,ipaValidated=True,commercialGame=False)
     (ROOT/'work/shader-diagnostics-report.json').write_text(json.dumps(report,indent=2)+'\n')

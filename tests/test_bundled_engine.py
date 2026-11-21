@@ -16,7 +16,7 @@ from core import Context, Failure, digest
 from bundled_engine import inventory, verify_bundle
 import engine
 from engine_fixture import make_engine
-from bundle_engine import stage_signed_engine
+from bundle_engine import LOCKED_TOOLS, TOOL_LOCK, stage_signed_engine, verify_shader_tool_lock
 
 
 class BundledEngineTests(unittest.TestCase):
@@ -81,9 +81,14 @@ class BundledEngineTests(unittest.TestCase):
     @unittest.skipUnless(sys.platform == 'darwin', 'Requires macOS code signing')
     def test_unsigned_native_tool_is_signed_only_in_build_copy(self):
         source=self.root/'fixture.c';source.write_text('int main(void) { return 0; }')
-        tool=self.source/'dm/tools/native-fixture'
+        tool=self.source/LOCKED_TOOLS['dmsh_xlate']
         subprocess.run(['xcrun','clang','-arch','arm64','-arch','x86_64',source,'-o',tool],check=True,capture_output=True)
         subprocess.run(['codesign','--remove-signature',tool],check=True,capture_output=True)
+        cross=self.source/LOCKED_TOOLS['spirv-cross'];cross.parent.mkdir()
+        cross.write_bytes(tool.read_bytes());cross.chmod(0o755)
+        lock=self.source/TOOL_LOCK
+        lock.write_text(f'# fixture\ndmsh_xlate\t{digest(tool)[:16]}\nspirv-cross\t{digest(cross)[:16]}\nmetal_macosx\tfixture\n')
+        original_lock=lock.read_bytes()
         self.record['files']=inventory(self.source)
         (self.source/'manifest.json').write_text(json.dumps(self.record))
         original=tool.read_bytes();before=(self.source/'manifest.json').read_bytes()
@@ -91,13 +96,19 @@ class BundledEngineTests(unittest.TestCase):
         stage_signed_engine(self.source,output)
         self.assertEqual(tool.read_bytes(),original)
         self.assertEqual((self.source/'manifest.json').read_bytes(),before)
-        record=verify_bundle(output);rel='dm/tools/native-fixture'
+        self.assertEqual(lock.read_bytes(),original_lock)
+        verify_shader_tool_lock(output)
+        self.assertIn('metal_macosx\tfixture\n',(output/TOOL_LOCK).read_text())
+        record=verify_bundle(output);rel=LOCKED_TOOLS['dmsh_xlate']
         self.assertEqual(record['adHocSignedFiles'][rel],digest(tool))
         self.assertNotEqual(record['files'][rel],digest(tool))
         subprocess.run(['codesign','--verify','--strict',output/rel],check=True,capture_output=True)
         subprocess.run([output/rel],check=True)
         moved=Context(dict(operation='prepareEngine',resources=str(output.parents[1]),privateRoot=str(self.root/'signed-private')))
         self.assertNotEqual(engine.inspect_source(moved)['fingerprint'],engine.inspect_source(self.c)['fingerprint'])
+        (output/TOOL_LOCK).write_bytes(original_lock)
+        with self.assertRaises(ValueError): verify_bundle(output)
+        with self.assertRaises(ValueError): verify_shader_tool_lock(output)
 
 
 if __name__ == '__main__': unittest.main()

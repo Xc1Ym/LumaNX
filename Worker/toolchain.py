@@ -59,6 +59,21 @@ def metal_available():
         return False
 
 
+def check_shader_translator(c):
+    tools = c.engine/'dm/gfx/tools'
+    ok, output = probe(c, [tools/'dmsh_xlate_bin/dmsh_xlate', '--source-sha'])
+    if not ok:
+        return False, output
+    try:
+        sources = (tools/'dmsh_xlate'/name for name in ('Program.cs', 'dmsh_xlate.csproj'))
+        expected = hashlib.sha256(b''.join(path.read_bytes() for path in sources)).hexdigest()[:16]
+    except OSError as error:
+        return False, str(error)
+    if output != expected:
+        return False, f'Embedded source SHA: {output}\nExpected source SHA: {expected}'
+    return True, output
+
+
 def inspect_environment(c):
     checks = []
     both = ['prepare', 'launch']
@@ -141,12 +156,7 @@ def inspect_environment(c):
         nx_ok=False; output=''
     add('NSP 读取组件', nx_ok, '引擎读取工具已就绪' if nx_ok else '内置引擎尚未完成初始化', TOOLS_HELP, 'prepareEngine', 'engine', detail=output, location=reader)
     xlate = c.engine/'dm/gfx/tools/dmsh_xlate_bin/dmsh_xlate' if info else None
-    ok, output = probe(c, [xlate, '--source-sha']) if xlate else (False,'')
-    try:
-        expected = hashlib.sha256(b''.join((c.engine/'dm/gfx/tools/dmsh_xlate'/n).read_bytes() for n in ('Program.cs','dmsh_xlate.csproj'))).hexdigest()[:16] if info else ''
-        ok = ok and output == expected and all((xlate.parent/n).is_file() for n in ('dmsh_xlate.dll','Ryujinx.Graphics.Shader.dll','Ryujinx.Common.dll'))
-    except OSError:
-        ok = False
+    ok, output = check_shader_translator(c) if info else (False,'')
     add('着色器翻译组件', ok, '检查引擎翻译器与源码是否一致', HELP, 'reinstall', 'engine', detail=output, location=xlate)
     ok, output = probe(c, [runtime/'bin/spirv-cross', '--revision'])
     add('SPIRV-Cross', ok and bool(output), output if ok else '着色器转换组件不可用', repair, 'reinstall', 'bundled', detail=output, location=runtime/'bin/spirv-cross')

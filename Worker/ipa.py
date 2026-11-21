@@ -12,6 +12,7 @@ import uuid
 import zipfile
 from core import Failure, chain_of, clone, digest, read
 import milestones as ms
+from shader_artifacts import generate_tables, validate_library
 
 IOS_FILES = ('dm/ios/tools/build_ipa.sh', 'dm/ios/tools/pack_ipa.py',
              'dm/ios/tools/ios_metal.py', 'dm/ios/project.yml', 'dm/ios/Sources/main.m')
@@ -69,7 +70,10 @@ def validate(path, c):
             executable = info.get('CFBundleExecutable', '')
             if not executable or '/' in executable or app+executable not in names or info.get('CFBundlePackageType') != 'APPL' or info.get('CFBundleSupportedPlatforms') != ['iPhoneOS']:
                 raise ValueError('iOS executable')
-            if not (app+'romfs.img' in names or any(n.startswith(app+'romfs/') for n in names)) or not any(n.startswith(app+'msl/') and n.endswith('.metallib') for n in names):
+            shader_prefix=app+'msl/'
+            shaders = any(n.startswith(shader_prefix) and (n.endswith('.metallib') or
+                re.fullmatch(r'(?:p\d+/)?b-[0-9a-f]{12}\.img', n[len(shader_prefix):])) for n in names)
+            if not (app+'romfs.img' in names or any(n.startswith(app+'romfs/') for n in names)) or not shaders:
                 raise ValueError('game resources')
             total = sum(i.file_size for i in archive.infolist()); done = 0
             for member in archive.infolist():
@@ -87,10 +91,11 @@ def validate_shaders(path, gp, repo):
         api='vk' if gp.get('graphics')=='vulkan' else 'gl'
         if (path/api/(api+'_shaders.metallib')).is_file(): return
     else:
-        chain = chain_of(repo,gp)
-        directory = path/('b-'+chain)
-        reflections = list(directory.glob('*_b.json'))
-        if reflections and all(p.with_suffix('.metallib').is_file() and read(p,{}).get('chain') == chain and 'iphoneos' in read(p,{}).get('chain_metal','') for p in reflections): return
+        try:
+            validate_library(path, chain_of(repo,gp), ios=True)
+            return
+        except Failure as error:
+            raise Failure('iOS 着色器产物缺失或编译平台不匹配，请重试。') from error
     raise Failure('iOS 着色器产物缺失或编译平台不匹配，请重试。')
 
 
@@ -105,8 +110,7 @@ def compile_application(c, root, repo, env, gp, selected, patched, shaders, aoc,
         validate_tables(root/'shader/cache',gp,chain_of(repo,gp))
     elif gp.get('graphics','nvn') not in ('vulkan','gl'):
         chain = chain_of(repo,gp)
-        c.run([sys.executable, Path(__file__).parent/'c1_generate.py', repo/'dm/gfx/tools/c1_guard.py',
-               root/'shader/cache'/('b-'+chain), gp.table('c1_full.tsv')], root/'logs/c1.log', env)
+        generate_tables(c,repo,root/'shader/cache'/('b-'+chain),gp.table,root/'logs/c1.log',env)
     packing = dict(env, GAME=gp.id, W=str(root/'ipa/work'), PATCHED=str(patched),
                    ROMFS=str(romfs_source(selected)), MSL_IOS=str(shaders), AOC=str(aoc),
                    GFXAPI=gp.get('graphics','nvn'), FONT_PY=sys.executable, STD_FONT=str(font),

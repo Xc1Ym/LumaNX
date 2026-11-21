@@ -17,7 +17,7 @@ ROOT=Path(__file__).resolve().parents[1]
 sys.path[:0]=[str(ROOT/'Worker'),str(ROOT/'tests')]
 from core import Context, Failure, Cancelled, atomic, digest, read
 import build, engine, incremental, library
-from engine_fixture import make_engine
+from engine_fixture import make_engine, write_shader_image
 
 TITLE='0100000000010000'
 SCRIPT='''
@@ -75,6 +75,7 @@ class IncrementalBuildTests(unittest.TestCase):
         self.save_game();self.tool_versions=dict(runtime='runtime1',clang='clang1',metal='metal1',
             **{'macos-sdk':'sdk1','spirv-cross':'spirv1','inputConfig':False,'readerLibrary':__import__('hashlib').sha256(b'library1').hexdigest(),'readerSDK':'10.0'})
         self.prepared=None;self.host_failure=False;self.cancel_host=False;self.compiler_invocations=0
+        self.packed_shaders=False
         self.prior_game=sys.modules.pop('game',None);self.sys_path=list(sys.path)
         self.stack=contextlib.ExitStack()
         self.stack.enter_context(contextlib.redirect_stdout(io.StringIO()))
@@ -120,9 +121,21 @@ class IncrementalBuildTests(unittest.TestCase):
         elif script.name=='dmsh_build.py':
             self.compiler_invocations+=1;self.event(work,'shaders')
             from core import chain_of
-            chain=chain_of(work/'engine');folder=work/'shader/cache'/('b-'+chain);folder.mkdir(parents=True)
-            (folder/'key_b.metallib').write_text('synthetic Metal library')
-            atomic(folder/'key_b.json',{'chain':chain})
+            chain=chain_of(work/'engine');folder=work/'shader/cache'/('b-'+chain)
+            if self.packed_shaders:
+                write_shader_image(folder.with_suffix('.img'), {
+                    'key_b.metallib': b'synthetic Metal library',
+                    'key_b.json': json.dumps({'chain': chain}).encode(),
+                    'inputs.tsv': f'game\t{TITLE}\ninputs\tfixture\n'.encode(),
+                })
+            else:
+                folder.mkdir(parents=True)
+                (folder/'key_b.metallib').write_text('synthetic Metal library')
+                atomic(folder/'key_b.json',{'chain':chain})
+        elif script.name in ('c1_guard.py', 'cb_extent.py'):
+            chain=Path(args[2]).name
+            self.assertTrue(Path(args[2]).with_suffix('.img').is_file())
+            Path(args[-1]).write_text(f'# chain {chain} inputs fixture\n')
         elif script.name=='c1_generate.py':
             from core import chain_of
             Path(args[-1]).write_text('# chain b-'+chain_of(work/'engine')+' synthetic table\n')
@@ -169,6 +182,25 @@ class IncrementalBuildTests(unittest.TestCase):
         (self.profile.parent/'shader_map.tsv').write_text('vs_data.bin\t0\tvs\tkey\tsynthetic\n')
         self.build();(self.work/'stage-inputs.json').unlink()
         self.assertEqual(self.delta(lambda:(self.source/'dm/host/controller_native.h').write_text('controller revision 2')),['host'])
+        self.assertEqual(self.compiler_invocations,1)
+
+    def test_registered_nvn_installs_and_reuses_packed_shader_library(self):
+        self.profile.write_text(self.profile.read_text().replace('graphics\tvulkan','graphics\tnvn'))
+        (self.profile.parent/'shader_map.tsv').write_text('vs_data.bin\t0\tvs\tkey\tsynthetic\n')
+        shader_reader=self.source/'dm/tools/shader_lib.py'
+        shader_reader.write_text('# Fixture selects the image-aware table tools')
+        self.packed_shaders=True
+        runtime=Path(self.build()['path'])
+        (image,)=list((runtime/'shaders').glob('b-*.img'))
+        for name in ('c1_full.tsv', 'cb_extent.tsv'):
+            self.assertEqual((runtime/'profile'/name).read_text(),f'# chain {image.stem} inputs fixture\n')
+        self.assertEqual(self.build()['path'],str(runtime))
+        image.write_bytes(b'DMROMFS1 truncated image')
+        with self.assertRaisesRegex(Failure,'Metal 着色器缓存不完整'):
+            build.validate_runtime(runtime)
+        replacement=Path(self.build()['path'])
+        self.assertNotEqual(replacement,runtime)
+        build.validate_runtime(replacement)
         self.assertEqual(self.compiler_invocations,1)
 
     def test_capture_and_decode_do_not_depend_on_later_stage_outputs(self):

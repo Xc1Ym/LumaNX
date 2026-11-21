@@ -1,6 +1,8 @@
 """Original protocol fixtures, not nxnative sources or executable engine code."""
 from pathlib import Path
 import hashlib
+import sys
+from unittest.mock import patch
 from core import atomic, digest
 import engine
 
@@ -24,3 +26,12 @@ def mark_prepared(c):
         path=tools/name;path.write_text('original protocol fixture');path.chmod(0o700)
     atomic(root/'ready.json',dict(info,snapshotHash=engine.source_hash(source),files={str(p.relative_to(root)):digest(p) for p in tools.iterdir()}))
     return root
+
+
+def write_shader_image(path, files):
+    from derived import module
+    tools = Path(__file__).resolve().parents[1]/'Engine/nxnative/dm/tools'
+    with patch.object(sys, 'path', list(sys.path)):
+        shader_lib = module(tools/'shader_lib.py', 'shader_lib_fixture')
+    path.parent.mkdir(parents=True, exist_ok=True)
+    shader_lib.write(files, str(path))
