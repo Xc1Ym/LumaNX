@@ -200,15 +200,26 @@ int main(void) {
         [pad.leftThumbstick setValueForXAxis:.75 yAxis:-.5];pad_read(pad);
         assert(received[p]==(DM_BTN_A|DM_BTN_B|DM_BTN_ZL|DM_BTN_R));assert(axes[p][0]>0&&axes[p][1]<0);
 #if __has_include("motion_pro_mac.h")
-        // Simulate an assigned passive motion source without opening HID devices.
-        g_pro_player=p;
+        // A live synthetic Pro Controller (model zero in the per-model
+        // transport) lets the front end pair it without opening a HID device.
+        c.testCategory=@"Switch Pro Controller";
+        testControllers=@[c,other];
+        pro_device pro={.heard=now_ns()};
+        g_pro_devices=&pro;
+        pads_motion_changed(nil);
+        unsigned clearsBeforeRelease=hid_motion_clears[p];
 #endif
         input_release();assert(received[p]==0&&axes[p][0]==0);pad_read(pad);assert(received[p]==0);
 #if __has_include("motion_pro_mac.h")
-        assert(hid_motion_clears[p]>0);
+        assert(hid_motion_clears[p]==clearsBeforeRelease+1);
+        testControllers=@[other];
 #endif
         g_input_on=1;pad_read(pad);assert(received[p]&DM_BTN_A);
         pads_changed(c);assert(received[p]==0&&axes[p][0]==0);assert(g_held[p]==nil);
+#if __has_include("motion_pro_mac.h")
+        assert(hid_motion_clears[p]==clearsBeforeRelease+2);
+        g_pro_devices=NULL;
+#endif
 #if __has_include("motion_apple.h")
         assert(motion_clears[p]>0);
 #endif
