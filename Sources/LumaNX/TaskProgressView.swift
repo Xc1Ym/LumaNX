@@ -11,7 +11,19 @@ struct TaskProgressView: View {
         return String(format:"%.0f",max(0,value))
     }
     var body: some View {
-        if !(task.milestones ?? []).isEmpty,task.milestone != nil {
+        VStack(alignment:.leading,spacing:8) {
+            progressContent
+            if task.state == "running" {TaskActivityView(task:task)}
+        }
+    }
+    @ViewBuilder private var progressContent: some View {
+        if task.state == "paused" {
+            VStack(alignment:.leading,spacing:6) {
+                Label(L("任务已暂停，点击继续任务以恢复。"),systemImage:"pause.circle")
+                    .font(.caption).foregroundStyle(.secondary)
+                if let fraction=task.progressFraction {ProgressView(value:fraction).tint(.secondary)}
+            }
+        } else if !(task.milestones ?? []).isEmpty,task.milestone != nil {
             MilestoneProgressView(task:task,compact:compact)
         } else {standard}
     }
@@ -68,5 +80,31 @@ struct ActiveTaskBanner: View {
                 }
             }
         }.padding(16).glassSurface(18).padding(.horizontal,24).padding(.bottom,16)
+    }
+}
+
+/// A heartbeat confirms the worker connection, not forward progress.
+struct TaskActivityView: View {
+    let task:TaskRecord
+    static func seconds(since time:Double?,now:Double)->Int? {
+        guard let time,time.isFinite,now.isFinite else {return nil}
+        return Int(min(315360000,max(0,now-time)))
+    }
+    private func age(_ seconds:Int)->String {seconds<60 ? "\(seconds)s" : "\(seconds/60)m \(seconds%60)s"}
+    var body:some View {
+        TimelineView(.periodic(from:.now,by:2)) {timeline in
+            let now=timeline.date.timeIntervalSince1970
+            let heartbeat=Self.seconds(since:task.lastHeartbeat,now:now)
+            let progress=Self.seconds(since:task.lastProgressAt ?? task.started,now:now)
+            VStack(alignment:.leading,spacing:3) {
+                if let heartbeat {
+                    Label(heartbeat<10 ? "Worker responding · heartbeat \(age(heartbeat)) ago" : "Worker heartbeat delayed · \(age(heartbeat)) ago",systemImage:heartbeat<10 ? "waveform.path" : "exclamationmark.circle")
+                        .foregroundStyle(heartbeat<10 ? Color.secondary : Color.orange)
+                } else {Text("Waiting for worker heartbeat…").foregroundStyle(.secondary)}
+                if let progress {Text("Last measured progress change: \(age(progress)) ago").foregroundStyle(.secondary)}
+                if let output=Self.seconds(since:task.lastOutputAt,now:now) {Text("Last log output: \(age(output)) ago").foregroundStyle(.secondary)}
+                if let progress,progress>=60 {Text("No new measured progress. The task may still be working; check its log for details.").foregroundStyle(.orange)}
+            }.font(.caption).textSelection(.enabled)
+        }
     }
 }

@@ -10,14 +10,37 @@ from shader_artifacts import generate_tables, validate_library
 
 class ShaderProgress:
     """Count only finished reflection/library pairs; do not infer progress from queue order."""
-    def __init__(self,g,repo,cache):
+    def __init__(self,g,repo,cache,progress=None):
         self.keys=set()
         for line in g.table('shader_map.tsv').read_text().splitlines():
             columns=line.split('\t')
             if len(columns)>4 and (columns[0].endswith('.bin') or columns[0].startswith('main.rodata@')):self.keys.add(columns[3])
         chain=chain_of(repo,g)
         self.path=Path(cache)/('b-'+chain)
+        self.progress=Path(progress) if progress else None
+        self.latest=None
     def __call__(self):
+        if self.progress:
+            try:
+                value=json.loads(self.progress.read_text())
+                done,total=value['done'],value['total']
+                if not isinstance(done,(int,float)) or not isinstance(total,(int,float)) or not 0<=done<=total or total<=0: raise ValueError('invalid progress')
+                self.latest=value
+            except (OSError,ValueError,KeyError,TypeError): pass
+            value=self.latest
+            if value:
+                done,total=value['done'],value['total']
+                if value.get('step')=='cache check':
+                    return dict(done=done,total=total,unit='shaders',step='Checking shader cache')
+                if done<total:
+                    return dict(done=done,total=total,unit='shaders',step='Compiling shaders')
+                image=Path(str(self.path)+'.img.part')
+                try: size=image.stat().st_size
+                except OSError: size=None
+                if size is not None:
+                    return dict(done=size,total=None,unit='B',step=f'All {int(total):,} shaders compiled; packaging library')
+                return dict(done=None,total=None,unit='shaders',step=f'All {int(total):,} shaders compiled; finalizing shader tables')
+            return dict(done=None,total=None,unit='shaders',step='Preparing shader compiler')
         names=set(os.listdir(self.path)) if self.path.is_dir() else set()
         done=sum(k+'_b.json' in names and k+'_b.metallib' in names for k in self.keys)
         return {'done':done,'total':len(self.keys),'unit':'shaders','step':'编译并验证 Metal 库'}
@@ -213,11 +236,12 @@ def prepare(c,g,target='macos'):
             c.emit(resetProgress=True)
         def _out(self,text): pass
         def set(self,**kw):
+            previous=self.cur.step if self.cur else None
             super().set(**kw)
             if self.cur:
                 st=self.cur
-                # Estimated totals are intentionally indeterminate in the UI.
-                c.emit(message=st.step,done=st.done,total=None if st.est else st.total,unit=st.unit)
+                # A subphase can have a different unit or no measurable total.
+                c.emit(message=st.step,done=st.done,total=None if st.est else st.total,unit=st.unit,resetProgress=previous!=st.step)
         def say(self,msg): c.emit('message',msg)
     up.PROG=Bridge(); up.run=container_runner(c,g)
     return root,repo,env,up,gp,key
@@ -235,7 +259,9 @@ def install(c,root,repo,gp,key,host,romfs,modules,shader,aoc=None,font=None):
         if src and Path(src).exists(): clone_tree(src,stage/name,c.progress)
     if Path(romfs).is_file(): clone(romfs,stage/'romfs.img',c.progress)
     else: cp(romfs,'romfs')
-    cp(modules,'modules'); cp(shader,'shaders'); cp(aoc,'aoc')
+    cp(modules,'modules'); cp(aoc,'aoc')
+    from runtime_payload import copy_shaders
+    copy_shaders(c,shader,stage/'shaders',chain_of(repo,gp),gp.get('graphics','nvn'))
     clone(host,stage/'dmhost'); os.chmod(stage/'dmhost',0o755)
     (stage/'profile').mkdir()
     for name in ['shader_map.tsv','pso_manifest.tsv']:
@@ -377,10 +403,35 @@ def build(c,target='macos'):
                 decoder={'oodle':oodle} if oodle else {}
                 if 'dlc_roms' in signature(up.split_shaders).parameters:
                     decoder['dlc_roms']=dlc_sources(aoc)
+                # Upstream proves that only DLC-owned shader content changed before
+                # invoking this callback. Preserve registered module fixes/settings.
+                shader_profile=root/'shader-profiles'/gp.id
+                def derive_dlc_profile():
+                    nonlocal gp
+                    from derived import module
+                    up.nacp=module(repo/'dm/tools/nacp.py','lumanx_nacp')
+                    up.derive_profile(gp,shader_profile,gp.get('package'),selected,
+                                      gp.words('modules'),shader_only=True)
+                    gp=type(gp)(shader_profile)
+                    env.update(DM_GAMES_DIR=str(shader_profile.parent),DM_GAMES_FIRST='1')
+                    c.emit('message','Using verified DLC-only shader tables; registered module fixes are preserved.')
+                    return gp
+                if decoder.get('dlc_roms') and 'derive_dlc' in signature(up.split_shaders).parameters:
+                    decoder['derive_dlc']=derive_dlc_profile
                 st.run('提取并核对着色器',[sh/'pkg'],lambda:up.split_shaders(sys.executable,repo,[romfs_source(d) for d in dirs.values()]+[d/'glslc_capture' for d in dirs.values() if (d/'glslc_capture').exists()],[d/'ExeFS/main' for d in dirs.values()],sh/'pkg',env,logs,gp,**decoder),milestone='extract')
+                # A checkpoint can reuse the split without invoking its callback.
+                if (sh/'pkg.dlc.key').is_file() and (shader_profile/'game.tsv').is_file():
+                    gp=type(gp)(shader_profile)
+                    env.update(DM_GAMES_DIR=str(shader_profile.parent),DM_GAMES_FIRST='1')
+                if st.graph: st.graph.profile=gp
                 def shaders():
-                    up.PROG.stage('iOS shaders' if target=='ios' else 'Mac shaders',poll=ShaderProgress(gp,repo,sh/'ios' if target=='ios' else sh/'cache'))
-                    try: c.run([sys.executable,repo/'dm/gfx/tools/dmsh_build.py',sh/'pkg',sh/'cache'],logs/'dmsh_build.log',dict(env,IOSOUT=str(sh/'ios')) if target=='ios' else env)
+                    progress=sh/'progress.json';progress.unlink(missing_ok=True)
+                    benv=dict(env,DMSH_PROGRESS=str(progress))
+                    if target=='ios': benv['IOSOUT']=str(sh/'ios')
+                    compiler=repo/'dm/gfx/tools/dmsh_build.py'
+                    feed=progress if compiler.is_file() and 'DMSH_PROGRESS' in compiler.read_text() else None
+                    up.PROG.stage('iOS shaders' if target=='ios' else 'Mac shaders',poll=ShaderProgress(gp,repo,sh/'ios' if target=='ios' else sh/'cache',feed))
+                    try: c.run([sys.executable,repo/'dm/gfx/tools/dmsh_build.py',sh/'pkg',sh/'cache'],logs/'dmsh_build.log',benv)
                     finally: up.PROG.watch(None)
                     if target=='ios':
                         from ipa import validate_shaders
