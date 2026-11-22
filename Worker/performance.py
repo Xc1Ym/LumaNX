@@ -135,7 +135,7 @@ def launch(c):
     def run(args,log=None,env=None,**kwargs):
         nonlocal session
         if not args or Path(args[0]).name!='dmhost':return original(args,log,env,**kwargs)
-        runtime=Path(args[0]).parent;game=c.game();env=dict(env or {});session=begin(c,game,runtime,env)
+        runtime=Path(args[1]).parent if len(args)>1 and Path(args[1]).name=='modules' else Path(args[0]).parent;game=c.game();env=dict(env or {});session=begin(c,game,runtime,env)
         offset=Path(log).stat().st_size if log and Path(log).exists() else 0
         try:value=original(args,log,env,**kwargs);outcome='exited';return value
         except BaseException as error:outcome='cancelled' if type(error).__name__=='Cancelled' else 'failed';raise

@@ -280,8 +280,10 @@ def catalog(c):
         if selected: g['display']=selected['display'] or p['builds'].get(strategy.get('version',p['package']),{}).get('display',strategy.get('version',''))
         manifest=read(c.library/'games'/g['id']/'current/manifest.json',{})
         cover=c.library/'games'/g['id']/'cover.jpg'; g['cover']=str(cover) if cover.exists() else ''
-        g['ready']=bool(manifest)
-        g['assetCompression']=bool(manifest.get('assetCompression'))
+        nas_runtime=g.get('nasRuntime',{}) if not manifest else {}
+        g['playingFromNAS']=bool(nas_runtime)
+        g['ready']=bool(manifest or nas_runtime)
+        g['assetCompression']=bool((manifest or nas_runtime).get('assetCompression'))
         g['assetCompressionCapable']=manifest.get('assetCompressionReader')==1
         g['assetCompressionRequested']=bool(g.get('assetCompressionRequested',False))
         archive=g.get('runtimeArchive',{})
@@ -290,8 +292,8 @@ def catalog(c):
         g['archiveSize']=archive.get('size')
         g['restoreSize']=archive.get('runtimeSize')
         if g['ready'] or g['archived']: g['missing']=[]
-        g['runtimeVersion']=manifest.get('version','') or archive.get('version','')
-        g['inputConfig']=manifest.get('inputConfig',True) if manifest else bool(selected_engine and selected_engine['inputConfig'])
+        g['runtimeVersion']=manifest.get('version','') or nas_runtime.get('version','') or archive.get('version','')
+        g['inputConfig']=(manifest or nas_runtime).get('inputConfig',True) if manifest or nas_runtime else bool(selected_engine and selected_engine['inputConfig'])
         g['needsPreparation']=bool(manifest) and (selected_engine is not None and manifest.get('engine') != selected_engine['fingerprint'] or bool(g['packages']) and manifest.get('sourceHashes') != sorted(x['sha256'] for x in g['packages']))
         if manifest and manifest.get('pipeline')!=pipeline: g['needsPreparation']=True
     cat['profiles']=[{'id':x['id'],'name':x['name'],'compatibility':x['compatibility'],'version':x['builds'].get(x['package'],{}).get('display','')} for x in ps.values()]

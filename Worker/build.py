@@ -533,7 +533,9 @@ def launch(c):
     from toolchain import require_launch_environment
     require_launch_environment(c)
     with c.lock('execution'):
-        g=c.game(); runtime=c.library/'games'/g['id']/'current'; validate_runtime(runtime)
+        from nas_play import launch_paths
+        g=c.game(); current=c.library/'games'/g['id']/'current'
+        runtime,host=launch_paths(c,g,current); validate_runtime(runtime)
         c.begin('游戏运行中',1,1)
         save=c.library/'saves'/g['id']; temp=c.library/'temp'/g['id']; pso=c.library/'games'/g['id']/'pso_user/pipelines.tsv'
         for p in (save,temp,pso.parent): p.mkdir(parents=True,exist_ok=True)
@@ -551,7 +553,7 @@ def launch(c):
         # of the optional keyboard/mouse mapping interface. Missing file = labels.
         env['DM_CONTROLLER_LAYOUTS']=str(c.private/'controller-layouts.json')
         log=c.private/'logs'/f'game-{g["id"]}.log'
-        try: c.run([runtime/'dmhost',runtime/'modules'],log,env,cwd=temp)
+        try: c.run([host,runtime/'modules'],log,env,cwd=temp)
         except Failure as error:
             with log.open('rb') as f:
                 f.seek(max(0,log.stat().st_size-16384)); tail=f.read().decode(errors='replace')

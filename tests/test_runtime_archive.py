@@ -43,6 +43,46 @@ class RuntimeArchiveTests(unittest.TestCase):
         with contextlib.redirect_stdout(io.StringIO()):return fn(*args)
     def saved(self):return (self.library/'saves'/GAME/'save.dat').read_bytes()
 
+    def test_publish_nas_launch_uses_remote_assets_and_local_host_and_saves(self):
+        import build
+        import nas_play
+        self.archive.mkdir()
+        published = self.quiet(nas_play.publish, self.c)
+        remote = Path(published['path'])
+        self.assertFalse((self.local / 'current').exists())
+        self.assertEqual(self.saved(), b'keep my save')
+        self.assertTrue((remote / 'romfs/assets').is_file())
+        self.assertFalse((remote / 'runtime.zip').exists())
+        captured = {}
+
+        def run(args, log, env, **kwargs):
+            captured.update(host=args[0], modules=args[1], env=env)
+
+        with patch('toolchain.require_launch_environment'), patch.object(self.c, 'run', side_effect=run):
+            self.quiet(build.launch, self.c)
+        self.assertTrue(captured['host'].is_relative_to(self.local.resolve()))
+        self.assertEqual(captured['modules'], remote / 'modules')
+        self.assertEqual(captured['env']['DM_ROMFS'], str(remote / 'romfs'))
+        self.assertEqual(captured['env']['DM_SAVE'], str(self.library.resolve() / 'saves' / GAME))
+        remote.rename(remote.with_name('offline'))
+        with self.assertRaisesRegex(Failure, 'offline'):
+            nas_play.launch_paths(self.c, self.c.game(), self.local / 'current')
+        new_release = self.local / 'releases' / 'new-local-build'
+        new_release.mkdir()
+        current = self.local / 'current'
+        current.symlink_to(new_release.relative_to(self.local), target_is_directory=True)
+        self.assertEqual(nas_play.launch_paths(self.c, self.c.game(), current), (current, current / 'dmhost'))
+
+    def test_failed_nas_publish_retains_active_game(self):
+        import nas_play
+        self.archive.mkdir()
+        with patch('nas_play._copy', side_effect=OSError('SMB write failed')):
+            with self.assertRaises(OSError):
+                self.quiet(nas_play.publish, self.c)
+        self.assertTrue((self.local / 'current/dmhost').is_file())
+        self.assertNotIn('nasRuntime', self.c.game())
+        self.assertEqual(self.saved(), b'keep my save')
+
     def test_archive_restore_round_trip_without_sources_or_build_cache(self):
         result=self.quiet(runtime_archive.archive,self.c)
         entry=result['archive'];archived=Path(entry['path'])

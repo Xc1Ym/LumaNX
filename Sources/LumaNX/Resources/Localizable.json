@@ -3886,5 +3886,29 @@
   {
     "source": "可单独选择 NUP 内容。各内容大小按单独导入计算；共享数据只计入所选大小一次。",
     "en": "Select packages individually. Package sizes are shown separately, and shared data counts once in the selected size."
+  },
+  {
+    "source": "移至 NAS 并直接游玩",
+    "en": "Move to NAS for direct play"
+  },
+  {
+    "source": "选择 NAS 游玩文件夹",
+    "en": "Choose a folder on the NAS"
+  },
+  {
+    "source": "校验后移除本地运行文件。游戏直接从 NAS 加载资源，存档和构建任务保留在 Mac。",
+    "en": "After verification, the local runtime is removed. The game loads assets directly from the NAS. Saves and build tasks stay on this Mac."
+  },
+  {
+    "source": "游戏已移至 NAS，可直接启动。",
+    "en": "Game moved to the NAS and ready to launch."
+  },
+  {
+    "source": "直接从 NAS 游玩",
+    "en": "Playing directly from NAS"
+  },
+  {
+    "source": "请选择已挂载的 NAS 共享文件夹。",
+    "en": "Choose a mounted NAS share."
   }
 ]

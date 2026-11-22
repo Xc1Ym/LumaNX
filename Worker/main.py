@@ -4,7 +4,7 @@ from pathlib import Path
 # The launcher starts Python in isolated mode; only this trusted Worker folder is added.
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from core import Context, Failure, Cancelled
-import asset_storage, performance
+import asset_storage, nas_play, performance
 import library, build, input_config, toolchain, engine, ipa, diagnostics, conversion, recovery, runtime_archive
 
 def main():
@@ -39,7 +39,7 @@ def main():
         ops['exportIPA'] = ipa.export
         ops['benchmarkMarker'] = performance.marker
         ops.update(compressAssets=asset_storage.compress,uncompressAssets=asset_storage.uncompress)
-        ops.update(archiveGame=runtime_archive.archive,restoreGame=runtime_archive.restore)
+        ops.update(archiveGame=runtime_archive.archive,restoreGame=runtime_archive.restore,publishNAS=nas_play.publish)
         ops.update(backupSave=recovery.backup,restoreSave=recovery.restore,listRecovery=recovery.list_recovery,activateRelease=recovery.activate)
         ops.update(convertFiles=conversion.convert,converterStatus=conversion.status,conversionKeys=conversion.import_keys)
         if request['operation'] not in ops: raise Failure('不支持的任务类型。')

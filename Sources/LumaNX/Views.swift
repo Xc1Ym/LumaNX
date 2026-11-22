@@ -276,7 +276,7 @@ struct GameDetail: View {
                 if game.ready==true {
                     VStack(alignment:.leading,spacing:4) {
                         Toggle(L("压缩游戏资源（Zstandard）"),isOn:Binding(get:{game.assetCompressionRequested ?? false},set:{store.confirmAssetCompression(game,enabled:$0)}))
-                            .disabled(store.executionBusy || !store.queue.isEmpty)
+                            .disabled(store.executionBusy || !store.queue.isEmpty || game.playingFromNAS == true)
                         Text(L(game.assetCompressionCapable==true ? "可选。游戏运行时按需解压资源，存档单独保存。" : "默认关闭。旧运行版本需要重新准备后才能使用压缩资源。"))
                             .font(.caption).foregroundStyle(.secondary)
                     }
@@ -294,7 +294,13 @@ struct GameDetail: View {
                         Button(L("性能报告…")){store.openPerformanceReports(game)}
                     }
                     toolDivider
-                    Button {store.archiveGame(game)} label:{GameToolLabel(title:"归档到 NAS…",symbol:"externaldrive.badge.plus")}.disabled(store.executionBusy || !store.queue.isEmpty)
+                    if game.playingFromNAS == true {
+                        Label(L("直接从 NAS 游玩"),systemImage:"externaldrive.connected.to.line.below")
+                    } else {
+                        Button {store.publishPlayableGame(game)} label:{GameToolLabel(title:"移至 NAS 并直接游玩",symbol:"externaldrive.connected.to.line.below")}
+                            .disabled(store.executionBusy || !store.queue.isEmpty)
+                        Button {store.archiveGame(game)} label:{GameToolLabel(title:"归档到 NAS…",symbol:"externaldrive.badge.plus")}.disabled(store.executionBusy || !store.queue.isEmpty)
+                    }
                     toolDivider
                 } else if game.archived==true {
                     Button {store.restoreGame(game)} label:{GameToolLabel(title:"恢复到本地",symbol:"arrow.down.to.line")}.disabled(store.executionBusy || !store.queue.isEmpty)

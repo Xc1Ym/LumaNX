@@ -399,7 +399,7 @@ final class WorkerOutput: @unchecked Sendable {
             self.hasImportedKeys = keys["ready"] as? Bool == true
             self.keyStatus = keys["message"] as? String ?? "尚未导入 prod.keys"
             if let records = Self.decode([TaskRecord].self,r["jobs"]) {
-                for rec in records where rec.state=="failed" || ["archiveGame","restoreGame","backupSave","restoreSave","activateRelease","setup","clean","remove","diagnostics","prepareEngine","import","build","exportIPA","convertFiles","launch","migrate","keys","installMetal","uninstallMetal"].contains(rec.operation) {
+                for rec in records where rec.state=="failed" || ["archiveGame","restoreGame","publishNAS","backupSave","restoreSave","activateRelease","setup","clean","remove","diagnostics","prepareEngine","import","build","exportIPA","convertFiles","launch","migrate","keys","installMetal","uninstallMetal"].contains(rec.operation) {
                     if !self.deletedTaskIDs.contains(rec.id),!self.tasks.contains(where: { $0.id == rec.id }) { self.tasks.append(rec) }
                 }
                 self.tasks.sort { ($0.started ?? 0) > ($1.started ?? 0) }
@@ -651,8 +651,9 @@ final class WorkerOutput: @unchecked Sendable {
         if task.operation == "import",let paths=task.importPaths {addGames(paths.map {URL(fileURLWithPath:$0)},previousSelections:task.nupSelections ?? [:]);return}
         guard let game = games.first(where:{$0.id == task.gameId}) else { return }
         if ["compressAssets","uncompressAssets"].contains(task.operation) {setAssetCompression(game,enabled:task.operation=="compressAssets");return}
-        if task.operation == "archiveGame" {
-            if let root=task.archiveRoot {runtimeTransfer("archiveGame",game:game,extra:["archiveRoot":root])}
+        if ["archiveGame","publishNAS"].contains(task.operation) {
+            if let root=task.archiveRoot {runtimeTransfer(task.operation,game:game,extra:["archiveRoot":root])}
+            else if task.operation == "publishNAS" {publishPlayableGame(game)}
             else {archiveGame(game)}
         }
         else if task.operation == "restoreGame" {restoreGame(game)}
