@@ -59,4 +59,7 @@ def main():
         c.finish('failed',str(e) if isinstance(e,Failure) else diagnostic['summary']); return 1
     finally:
         heartbeat_stop.set()
+        # The launcher reads the last line as the worker exits; the pause keeps
+        # the pipe open long enough for the result to arrive.
+        time.sleep(0.5)
 if __name__=='__main__': sys.exit(main())
