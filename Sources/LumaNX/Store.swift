@@ -609,7 +609,7 @@ final class WorkerOutput: @unchecked Sendable {
         }
     }
     func canPause(_ task: TaskRecord) -> Bool {
-        ["build","exportIPA","convertFiles","archiveGame","restoreGame"].contains(task.operation) &&
+        ["build","exportIPA","convertFiles","archiveGame","restoreGame","compressAssets","uncompressAssets"].contains(task.operation) &&
         ["running","paused"].contains(task.state) && processes[task.id]?.isRunning == true
     }
     func togglePause(_ task: TaskRecord) {
@@ -640,6 +640,7 @@ final class WorkerOutput: @unchecked Sendable {
         if task.operation == "convertFiles",let conversion=task.conversion {startConversion(conversion);return}
         if task.operation == "import",let paths=task.importPaths {addGames(paths.map {URL(fileURLWithPath:$0)});return}
         guard let game = games.first(where:{$0.id == task.gameId}) else { return }
+        if ["compressAssets","uncompressAssets"].contains(task.operation) {setAssetCompression(game,enabled:task.operation=="compressAssets");return}
         if task.operation == "archiveGame" {
             if let root=task.archiveRoot {runtimeTransfer("archiveGame",game:game,extra:["archiveRoot":root])}
             else {archiveGame(game)}

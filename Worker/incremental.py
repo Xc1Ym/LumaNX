@@ -38,7 +38,7 @@ def checkpoints(path):
 
 
 def pipeline_version(target='macos'):
-    names=('incremental.py','build.py','core.py','derived.py','dump.py','nup.py','runtime_payload.py')+(('ipa.py',) if target=='ios' else ())
+    names=('incremental.py','build.py','core.py','derived.py','dump.py','nup.py','runtime_payload.py','compressed_assets.py','asset_storage.py')+(('ipa.py',) if target=='ios' else ())
     return hash_value({name:digest(WORKER/name) for name in names})
 
 

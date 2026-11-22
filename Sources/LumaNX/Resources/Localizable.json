@@ -3686,5 +3686,57 @@
   {
     "source": "；恢复后本地：",
     "en": " · Local after restore: "
+  },
+  {
+    "source": "压缩游戏资源",
+    "en": "Compress game assets"
+  },
+  {
+    "source": "使用未压缩资源",
+    "en": "Use uncompressed assets"
+  },
+  {
+    "source": "压缩游戏资源（Zstandard）",
+    "en": "Compress game assets (Zstandard)"
+  },
+  {
+    "source": "可选。游戏运行时按需解压资源，存档单独保存。",
+    "en": "Optional. Assets decompress as needed while playing. Saves stay separate."
+  },
+  {
+    "source": "默认关闭。旧运行版本需要重新准备后才能使用压缩资源。",
+    "en": "Off by default. Older runtimes need preparation before compressed assets can be used."
+  },
+  {
+    "source": "使用压缩游戏资源？",
+    "en": "Use compressed game assets?"
+  },
+  {
+    "source": "使用未压缩游戏资源？",
+    "en": "Use uncompressed game assets?"
+  },
+  {
+    "source": "切换前会校验替换版本，随后移除之前的活动版本以释放空间。其他运行版本和存档保留。需要临时可用空间。此选择也适用于以后的准备。",
+    "en": "A replacement is verified before switching. The previous active release is then removed to reclaim space. Other releases and saves are kept. Temporary free space is required. This also sets your choice for future preparations."
+  },
+  {
+    "source": "此选择适用于下次准备。当前已编译游戏仍可运行。如有需要，请重新导入源文件并再次准备，以启用新的资源读取器。",
+    "en": "This choice applies to the next preparation. Your current compiled game remains playable. Reimport source packages if needed, then prepare again to enable the new asset reader."
+  },
+  {
+    "source": "使用压缩",
+    "en": "Use compression"
+  },
+  {
+    "source": "保持未压缩",
+    "en": "Keep uncompressed"
+  },
+  {
+    "source": "已为下次准备选择压缩。当前游戏文件已保留。",
+    "en": "Compression selected for the next preparation. Current game files were kept."
+  },
+  {
+    "source": "资源存储偏好已更新。",
+    "en": "Asset storage preference updated."
   }
 ]

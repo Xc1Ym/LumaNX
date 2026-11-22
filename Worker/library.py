@@ -226,6 +226,9 @@ def catalog(c):
         manifest=read(c.library/'games'/g['id']/'current/manifest.json',{})
         cover=c.library/'games'/g['id']/'cover.jpg'; g['cover']=str(cover) if cover.exists() else ''
         g['ready']=bool(manifest)
+        g['assetCompression']=bool(manifest.get('assetCompression'))
+        g['assetCompressionCapable']=manifest.get('assetCompressionReader')==1
+        g['assetCompressionRequested']=bool(g.get('assetCompressionRequested',False))
         archive=g.get('runtimeArchive',{})
         g['archived']=bool(archive.get('path')) and not g['ready']
         g['archivePath']=archive.get('path')

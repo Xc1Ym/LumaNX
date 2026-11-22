@@ -284,6 +284,15 @@ def install(c,root,repo,gp,key,host,romfs,modules,shader,aoc=None,font=None):
         c.run([sys.executable,repo/'dm/tools/make_ext_font.py',stage/'font/nintendo_ext.ttf'],root/'logs/font.log',c.env(gp.id,root))
     manifest={'schema':1,'gameId':gp.id,'engine':read(root/'identity.json',{}).get('tools',{}).get('engine','external'),'cacheKey':key,'sourceHashes':read(root/'identity.json',{}).get('sources',[]),'chain':chain,'graphics':gp.get('graphics','nvn'),'version':gp.builds()[gp.get('package')]['display'],'inputConfig':read(root/'identity.json',{}).get('tools',{}).get('inputConfig',False),'created':time.time(),'preparationMode':'derived' if own else 'registered','pipeline':read(root/'identity.json',{}).get('pipeline')}
     from incremental import runtime_inventory
+    from compressed_assets import host_supports
+    capable=host_supports(stage/'dmhost')
+    manifest['assetCompressionReader']=1 if capable else 0
+    requested=bool(c.game().get('assetCompressionRequested',False))
+    if requested:
+        if not capable:raise Failure('This engine cannot read compressed assets. Use a compression-capable bundled engine or turn compression off.')
+        from asset_storage import convert_files
+        convert_files(c,stage,True)
+    manifest['assetCompression']=requested
     manifest['artifacts']=runtime_inventory(c,stage)
     atomic(stage/'manifest.json',manifest)
     validate_runtime(stage,gp)
@@ -309,7 +318,11 @@ def validate_runtime(path,gp=None):
         from derived import module
         rfs=module(Path(__file__).resolve().parents[1]/'Engine/nxnative/dm/tools/romfs.py','lumanx_runtime_romfs')
         try:
-            image=rfs.Image(romfs)
+            from compressed_assets import is_compressed,validate_romfs
+            if is_compressed(romfs):
+                if m.get('assetCompressionReader')!=1:raise ValueError('Compressed assets require a capable runtime')
+                image=validate_romfs(rfs,romfs)
+            else:image=rfs.Image(romfs)
             if gp and gp.get('romfs_marker'): image.find(gp.get('romfs_marker'))
         except FileNotFoundError: raise Failure('游戏资源缺少配置指定的文件。')
         except (OSError,ValueError): raise Failure('运行目录不完整。')
@@ -522,6 +535,7 @@ def launch(c):
         else: cfg=None
         env=c.env(g['id'],temp); env.update(DM_WINDOW='1',DM_AUDIO='1',DM_LANG=language,DM_ROMFS=str(runtime/'romfs'),DM_SAVE=str(save),DM_TEMP=str(temp),DM_AOC_DIR=str(runtime/'aoc'),DM_FONT_DIR=str(runtime/'font'),DM_MSL_DIR=str(runtime/'shaders'),DM_NVN_SHMAP=str(runtime/'profile/shader_map.tsv'),DM_PSO_USER=str(pso))
         if (runtime/'romfs.img').is_file(): env['DM_ROMFS']=str(runtime/'romfs.img')
+        env['DM_ASSET_ZSTD_LIBRARY']=str(c.runtime/'lib/libzstd.1.dylib')
         if cfg: env['DM_INPUT_CONFIG']=str(cfg)
         # Always override inherited state; native controller policy is independent
         # of the optional keyboard/mouse mapping interface. Missing file = labels.

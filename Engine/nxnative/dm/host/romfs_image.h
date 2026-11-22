@@ -1,6 +1,7 @@
 // DMROMFS1's index loader, shared by the host mount and iOS startup. Startup must validate the same index before replacing a working folder.
 #pragma once
 #include <errno.h>
+#include "compressed_asset_image.h"
 #include <fcntl.h>
 #include <stdint.h>
 #include <stdlib.h>
@@ -12,10 +13,10 @@ typedef struct { uint64_t a, b; uint32_t name; uint16_t nlen; uint8_t type, flag
 _Static_assert(sizeof(img_ent) == 24, "RomFS image entry layout");
 #define IMG_ENT_DAMAGED 1    // in the image: this file failed the NCA's hash check and was written as read (nx_extract --allow-damaged)
 #define IMG_ENT_REPORTED 2   // in memory only: the host has named this damaged file in its log
-typedef struct { int fd; uint64_t n, damaged; img_ent *e; const char *names; } romfs_img;
+typedef struct { int fd; ax_image *compressed; uint64_t n, damaged; img_ent *e; const char *names; } romfs_img;
 
 static void romfs_image_close(romfs_img *m) {
-    if (m) { close(m->fd); free(m->e); free(m); }
+    if (m) { close(m->fd); ax_close(m->compressed); free(m->e); free(m); }
 }
 static int romfs_image_read(int fd, void *buf, size_t size, off_t off) {
     size_t got = 0;
@@ -29,16 +30,22 @@ static int romfs_image_read(int fd, void *buf, size_t size, off_t off) {
 }
 // NULL for an incomplete or invalid image (errno EINVAL), an I/O error, or allocation failure. The caller owns the descriptor and index on success.
 static romfs_img *romfs_image_open(const char *path) {
+    ax_image *compressed = NULL;
     int fd = open(path, O_RDONLY); struct stat st; uint8_t h[32]; romfs_img *m = NULL; uint64_t ioff, isz, n;
     if (fd < 0) return NULL;
     if (fstat(fd, &st) || !romfs_image_read(fd, h, sizeof h, 0)) goto bad;
+    if (!memcmp(h, "LNXBLK01", 8)) {
+        compressed = ax_open(path, 4 << 20);
+        if (!compressed || ax_pread(compressed, h, sizeof h, 0) != sizeof h) goto bad;
+        st.st_size = (off_t)compressed->h.logical;
+    }
     errno = EINVAL;
     if (memcmp(h, "DMROMFS1", 8) || st.st_size < (off_t)sizeof h) goto bad;
     memcpy(&ioff, h + 8, 8); memcpy(&isz, h + 16, 8); memcpy(&n, h + 24, 8);
     if (!n || n > UINT32_MAX || ioff < sizeof h || ioff > (uint64_t)st.st_size || isz != (uint64_t)st.st_size - ioff || isz > SIZE_MAX || n > isz / sizeof(img_ent)) goto bad;
     if (!(m = calloc(1, sizeof *m))) goto bad;
-    m->fd = fd;
-    if (!(m->e = malloc((size_t)isz)) || !romfs_image_read(fd, m->e, (size_t)isz, (off_t)ioff)) goto bad;
+    m->fd = fd; m->compressed = compressed;
+    if (!(m->e = malloc((size_t)isz)) || !(compressed ? ax_pread(compressed, m->e, (size_t)isz, (int64_t)ioff) == (ssize_t)isz : romfs_image_read(fd, m->e, (size_t)isz, (off_t)ioff))) goto bad;
     m->n = n; m->names = (const char *)m->e + n * sizeof(img_ent);
     uint64_t pool = isz - n * sizeof(img_ent), next_child = 1;
     errno = EINVAL;
@@ -69,7 +76,7 @@ static romfs_img *romfs_image_open(const char *path) {
     return m;
 bad: {
     int e = errno ? errno : EINVAL;
-    if (m) romfs_image_close(m); else close(fd);
+    if (m) romfs_image_close(m); else { close(fd); ax_close(compressed); }
     errno = e; return NULL;
     }
 }

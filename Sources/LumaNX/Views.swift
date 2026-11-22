@@ -265,6 +265,12 @@ struct GameDetail: View {
                     toolDivider
                 }
                 if game.ready==true {
+                    VStack(alignment:.leading,spacing:4) {
+                        Toggle(L("压缩游戏资源（Zstandard）"),isOn:Binding(get:{game.assetCompressionRequested ?? false},set:{store.confirmAssetCompression(game,enabled:$0)}))
+                            .disabled(store.executionBusy || !store.queue.isEmpty)
+                        Text(L(game.assetCompressionCapable==true ? "可选。游戏运行时按需解压资源，存档单独保存。" : "默认关闭。旧运行版本需要重新准备后才能使用压缩资源。"))
+                            .font(.caption).foregroundStyle(.secondary)
+                    }
                     Button {store.archiveGame(game)} label:{GameToolLabel(title:"归档到 NAS…",symbol:"externaldrive.badge.plus")}.disabled(store.executionBusy || !store.queue.isEmpty)
                     toolDivider
                 } else if game.archived==true {
