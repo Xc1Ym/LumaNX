@@ -102,6 +102,20 @@ def scan_import(c):
                 with nup.opened(c, path) as (parser, container):
                     _, profile, packages = nup.metadata(c, parser, container)
                     entry['allowsPackageSelection'] = not container.siblings and len(packages) > 1
+                    if entry['allowsPackageSelection']:
+                        from nup_subset import size_groups, subset_size
+                        _, base, updates, dlc = parser.scan(container)
+                        by_type = {'update': updates, 'dlc': dlc}
+                        choices = {}
+                        for package in packages:
+                            kind = package['type']
+                            identifier = int(package['titleId'], 16) if kind == 'dlc' else package['version']
+                            choices[nup.package_key(package)] = base if kind == 'base' else by_type[kind][identifier]
+                        groups = size_groups(c, parser, container, choices)
+                        header, toc_header = parser.SUPER.size, parser.TOC.size
+                        entry['subsetSizing'] = dict(groups=groups, headerBytes=header, tocHeaderBytes=toc_header)
+                        for package in packages:
+                            package['standaloneBytes'] = subset_size(groups, {nup.package_key(package)}, header, toc_header)
                     candidates = (k for k in container.packages if k.kind in (parser.BASE, parser.UPDATE) and k.exefs != parser.NO_DIR)
                     selected = max(candidates, key=lambda k: k.version)
                     name, display, _ = nup.control_data(c, parser, container, selected)
@@ -120,7 +134,7 @@ def scan_import(c):
             else:
                 packages = container_packages(inspect(c, path))
             entry['packages'] = [
-                {key: package.get(key) for key in ('type', 'version', 'display', 'titleId', 'name')}
+                {key: package.get(key) for key in ('type', 'version', 'display', 'titleId', 'name', 'standaloneBytes')}
                 for package in packages
             ]
         except (Failure, OSError) as error:

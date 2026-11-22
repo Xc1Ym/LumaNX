@@ -127,11 +127,14 @@ class NupGameTests(unittest.TestCase):
         source = self.source.resolve()
         base_key = f'base:0:{TITLE}'
         update_key = f'update:{VERSION}:{int(TITLE, 16) + 0x800:016X}'
+        preview = self.quiet(library.scan_import, self.c)['entries'][0]
+        estimates = {p['type']: p['standaloneBytes'] for p in preview['packages']}
         self.c.r['nupSelections'] = {str(source): [base_key]}
         self.imported()
         base = self.game()['packages'][0]
         self.assertEqual(base['type'], 'base')
         self.assertLess(base['size'], source.stat().st_size)
+        self.assertEqual(base['size'], estimates['base'])
         with nup.opened(self.c, self.c.library / base['path']) as (parser, container):
             _, _, updates, dlc = parser.scan(container)
             self.assertEqual((updates, dlc), ({}, {}))
@@ -140,6 +143,7 @@ class NupGameTests(unittest.TestCase):
         base_after, update = self.game()['packages']
         self.assertEqual(base_after, base)
         self.assertNotEqual(update['path'], base['path'])
+        self.assertEqual(update['size'], estimates['update'])
         with nup.opened(self.c, self.c.library / update['path']) as (parser, container):
             _, original_base, updates, dlc = parser.scan(container)
             self.assertIsNone(original_base)

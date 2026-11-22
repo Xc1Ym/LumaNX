@@ -1,6 +1,23 @@
 import SwiftUI
 
 struct ImportPreviewEntry: Decodable, Identifiable {
+    struct SubsetSizing: Decodable {
+        struct Group: Decodable {
+            let keys: Set<String>
+            let tocBytes: Int64
+            let dataBytes: Int64
+        }
+        let groups: [Group]
+        let headerBytes: Int64
+        let tocHeaderBytes: Int64
+
+        func bytes(for selection: Set<String>) -> Int64 {
+            let included = groups.filter { !$0.keys.isDisjoint(with:selection) }
+            let table = tocHeaderBytes + included.reduce(0) { $0 + $1.tocBytes }
+            return headerBytes + ((table + 15) / 16) * 16 + included.reduce(0) { $0 + $1.dataBytes }
+        }
+    }
+
     struct Package: Decodable {
         var key: String { "\(type):\(version):\(titleId)" }
         let type: String
@@ -8,6 +25,7 @@ struct ImportPreviewEntry: Decodable, Identifiable {
         let display: String?
         let titleId: String
         let name: String?
+        let standaloneBytes: Int64?
     }
 
     var id: String { path }
@@ -15,6 +33,7 @@ struct ImportPreviewEntry: Decodable, Identifiable {
     let name: String
     let format: String
     let size: Int64?
+    let subsetSizing: SubsetSizing?
     let requiresKeys: Bool
     let title: String?
     let packages: [Package]
@@ -67,12 +86,24 @@ struct ImportReviewView: View {
         }
     }
 
+    private func sizeLabel(_ bytes: Int64) -> String {
+        ByteCountFormatter.string(fromByteCount:bytes,countStyle:.file)
+    }
+
+    private func selectedSize(for entry: ImportPreviewEntry) -> Int64? {
+        guard selected.contains(entry.path) else { return nil }
+        guard let keys = packagesByPath[entry.path], keys.count != entry.packages.count else { return entry.size }
+        guard !keys.isEmpty else { return 0 }
+        return entry.subsetSizing?.bytes(for:keys)
+    }
+
     var body: some View {
         VStack(alignment:.leading,spacing:16) {
             Text(L("检查要导入的游戏")).font(.title2.bold())
             Text(L("请选择要复制到游戏库的文件或文件夹。")).foregroundStyle(.secondary)
             if review.entries.contains(where:{ $0.allowsPackageSelection == true }) {
-                Text(L("展开的 NUP 内容可以单独选择。")).font(.callout).foregroundStyle(.secondary)
+                Text(L("可单独选择 NUP 内容。各内容大小按单独导入计算；共享数据只计入所选大小一次。"))
+                    .font(.callout).foregroundStyle(.secondary)
             }
             List(review.entries) { entry in
                 VStack(alignment:.leading,spacing:5) {
@@ -80,13 +111,13 @@ struct ImportReviewView: View {
                         get:{ selected.contains(entry.path) },
                         set:{ if $0 { selected.insert(entry.path) } else { selected.remove(entry.path) } }
                     )).disabled(entry.error != nil).fontWeight(.medium)
-                    Text([entry.format, entry.size.map { ByteCountFormatter.string(fromByteCount:$0,countStyle:.file) }, entry.title == nil ? nil : entry.name].compactMap { $0 }.joined(separator:" · "))
+                    Text([entry.format, entry.size.map { String(format:L("源文件：%@"),sizeLabel($0)) }, entry.title == nil ? nil : entry.name].compactMap { $0 }.joined(separator:" · "))
                         .textSelection(.enabled)
                     ForEach(Array(entry.packages.enumerated()),id:\.offset) { _, package in
                         let kind = ["base":L("本体"),"update":L("更新"),"dlc":"DLC"][package.type] ?? package.type
                         let internalVersion = "v\(package.version)"
                         let version = package.display.flatMap { $0.isEmpty || $0 == internalVersion ? nil : $0 } ?? internalVersion
-                        let label = [package.name == entry.title ? nil : package.name, kind, version, package.titleId]
+                        let label = [package.name == entry.title ? nil : package.name, kind, version, package.titleId, package.standaloneBytes.map(sizeLabel)]
                             .compactMap { $0 }.joined(separator:" · ")
                         if entry.allowsPackageSelection == true {
                             Toggle(label,isOn:Binding(
@@ -99,6 +130,9 @@ struct ImportReviewView: View {
                         } else {
                             Text(label).textSelection(.enabled)
                         }
+                    }
+                    if let bytes = selectedSize(for:entry), entry.allowsPackageSelection == true {
+                        Text(String(format:L("所选导入内容：%@"),sizeLabel(bytes))).fontWeight(.medium)
                     }
                     if entry.metadataDeferred == true {
                         Text(L("此文件的详细内容将在导入时读取。"))

@@ -9,7 +9,7 @@ def align(offset):
     return (offset + 15) & ~15
 
 
-def write(c, parser, container, packages, destination):
+def reachable(c, parser, container, packages):
     directory_ids, file_ids = {}, {}
     pending = [index for package in packages for index in (package.root, package.exefs, package.romfs)
                if index != parser.NO_DIR]
@@ -24,6 +24,55 @@ def write(c, parser, container, packages, destination):
                 pending.append(child)
             elif child not in file_ids:
                 file_ids[child] = len(file_ids)
+
+    return directory_ids, file_ids
+
+
+def size_groups(c, parser, container, packages_by_key):
+    """Group byte costs by the set of packages that reference them."""
+    directories, files, extents = {}, {}, {}
+    buckets = {}
+
+    def add(mask, toc=0, data=0):
+        bucket = buckets.setdefault(mask, [0, 0])
+        bucket[0] += toc
+        bucket[1] += data
+
+    keys = list(packages_by_key)
+    for bit, package in enumerate(packages_by_key.values()):
+        mask = 1 << bit
+        add(mask, parser.PKG.size, align(package.meta_size))
+        package_dirs, package_files = reachable(c, parser, container, [package])
+        for index in package_dirs:
+            directories[index] = directories.get(index, 0) | mask
+        for index in package_files:
+            files[index] = files.get(index, 0) | mask
+    for index, mask in directories.items():
+        c.check()
+        add(mask, parser.DIR.size + len(container.dirs[index][0]) + 4 * len(container.children(index)))
+    for index, mask in files.items():
+        c.check()
+        name, _, _, offset, stored_size, _ = container.files[index]
+        add(mask, parser.FILE.size + len(name))
+        if stored_size:
+            extent = (offset, stored_size)
+            extents[extent] = extents.get(extent, 0) | mask
+    for (_, stored_size), mask in extents.items():
+        add(mask, data=align(stored_size))
+    return [
+        dict(keys=[key for bit, key in enumerate(keys) if mask & (1 << bit)], tocBytes=toc, dataBytes=data)
+        for mask, (toc, data) in buckets.items()
+    ]
+
+
+def subset_size(groups, selection, header_bytes, toc_header_bytes):
+    included = [group for group in groups if selection.intersection(group['keys'])]
+    return header_bytes + align(toc_header_bytes + sum(group['tocBytes'] for group in included)) + sum(
+        group['dataBytes'] for group in included)
+
+
+def write(c, parser, container, packages, destination):
+    directory_ids, file_ids = reachable(c, parser, container, packages)
 
     pool = bytearray()
 

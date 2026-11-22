@@ -3874,5 +3874,17 @@
   {
     "source": "复制期间源文件发生变化，请重新扫描。",
     "en": "The source file changed during copying. Scan it again."
+  },
+  {
+    "source": "源文件：%@",
+    "en": "Source file: %@"
+  },
+  {
+    "source": "所选导入内容：%@",
+    "en": "Selected import: %@"
+  },
+  {
+    "source": "可单独选择 NUP 内容。各内容大小按单独导入计算；共享数据只计入所选大小一次。",
+    "en": "Select packages individually. Package sizes are shown separately, and shared data counts once in the selected size."
   }
 ]
