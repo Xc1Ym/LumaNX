@@ -101,6 +101,7 @@ def scan_import(c):
             if fmt == 'NUP':
                 with nup.opened(c, path) as (parser, container):
                     _, profile, packages = nup.metadata(c, parser, container)
+                    entry['allowsPackageSelection'] = not container.siblings and len(packages) > 1
                     candidates = (k for k in container.packages if k.kind in (parser.BASE, parser.UPDATE) and k.exefs != parser.NO_DIR)
                     selected = max(candidates, key=lambda k: k.version)
                     name, display, _ = nup.control_data(c, parser, container, selected)

@@ -123,6 +123,29 @@ class NupGameTests(unittest.TestCase):
         self.quiet(nup.extract,self.c,self.c.library/self.game()['packages'][0]['path'],VERSION,out2)
         self.assertIsNotNone(rfs.Image(out2/'RomFS.img').find('removed'))
 
+    def test_partial_import_copies_only_selected_extents_and_merges_later_update(self):
+        source = self.source.resolve()
+        base_key = f'base:0:{TITLE}'
+        update_key = f'update:{VERSION}:{int(TITLE, 16) + 0x800:016X}'
+        self.c.r['nupSelections'] = {str(source): [base_key]}
+        self.imported()
+        base = self.game()['packages'][0]
+        self.assertEqual(base['type'], 'base')
+        self.assertLess(base['size'], source.stat().st_size)
+        with nup.opened(self.c, self.c.library / base['path']) as (parser, container):
+            _, _, updates, dlc = parser.scan(container)
+            self.assertEqual((updates, dlc), ({}, {}))
+        self.c.r['nupSelections'] = {str(source): [update_key]}
+        self.imported()
+        base_after, update = self.game()['packages']
+        self.assertEqual(base_after, base)
+        self.assertNotEqual(update['path'], base['path'])
+        with nup.opened(self.c, self.c.library / update['path']) as (parser, container):
+            _, original_base, updates, dlc = parser.scan(container)
+            self.assertIsNone(original_base)
+            self.assertEqual((list(updates), dlc), ([VERSION], {}))
+        self.pipeline(expect_dlc=False)
+
     def test_ios_blocked_before_engine_and_source_mixing_rejected(self):
         self.imported()
         with patch('build.tools') as tools:
@@ -243,7 +266,7 @@ class NupGameTests(unittest.TestCase):
     def test_full_pipeline_cache_install_image_validation_launch_and_tamper(self):
         self.imported();self.pipeline()
 
-    def pipeline(self):
+    def pipeline(self, expect_dlc=True):
         game=self.game();work=self.c.library/'cache'/TITLE/'fixture';work.mkdir(parents=True)
         gp=SimpleNamespace(id=TITLE,get=lambda k,d=None:{'package':f'v{VERSION}','graphics':'vulkan','romfs_marker':'dir/marker'}.get(k,d),
             words=lambda k,d=None:['main','sdk'] if k=='modules' else [d],builds=lambda:{f'v{VERSION}':{'display':'1.2'}},
@@ -268,7 +291,7 @@ class NupGameTests(unittest.TestCase):
              patch.object(self.c,'nx',side_effect=AssertionError('must not decrypt')),patch.object(self.c,'run',side_effect=run),\
              patch('build.compile_host',side_effect=host),patch('toolchain.require_launch_environment'):
             result=build.build(self.c);runtime=Path(result['path']);build.validate_runtime(runtime,gp)
-            self.assertTrue((runtime/'romfs.img').is_file());self.assertTrue((runtime/'aoc/1.img').is_file())
+            self.assertTrue((runtime/'romfs.img').is_file());self.assertEqual((runtime/'aoc/1.img').is_file(), expect_dlc)
             build.launch(self.c);self.assertTrue(runs[-1][1]['DM_ROMFS'].endswith('romfs.img'))
             build.build(self.c);self.assertEqual(len(rewrites),1)
             managed=self.c.library/game['packages'][0]['path'];managed.write_bytes(b'changed')

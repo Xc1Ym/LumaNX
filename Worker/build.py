@@ -310,6 +310,9 @@ def validate_runtime(path,gp=None):
     romfs=path/'romfs.img' if (path/'romfs.img').is_file() else path/'romfs'
     if not (path/'dmhost').is_file() or not (romfs.is_file() or romfs.is_dir()): raise Failure('运行目录不完整。')
     mods=gp.words('modules') if gp else [p.name.split('.')[0] for p in (path/'modules').glob('*.patched.bin')]
+    if gp and hasattr(gp, 'build_modules'):
+        main = gp.builds().get(gp.get('package'), {}).get('main')
+        mods = gp.build_modules().get(main, mods)
     if not mods: raise Failure('运行目录缺少代码模块。')
     for mod in mods:
         for ext in ('patched.bin','fixups.tsv','gates.tsv'):
@@ -371,7 +374,10 @@ def build(c,target='macos'):
                 st.run('解包与合并 '+ver,[d],lambda d=d,upd=upd: dump.extract(c,upd or c.library/base['path'],d),milestone=f'unpack-{index}')
             elif g.get('sourceKind')=='nup':
                 import nup
-                st.run('解包与合并 '+ver,[d],lambda d=d,ver=ver:nup.extract(c,c.library/sources[0]['path'],int(ver[1:]),d),milestone=f'unpack-{index}')
+                package = next((p for p in g['packages'] if p['type'] in ('base', 'update') and f"v{p['version']}" == ver), None)
+                if package is None: raise Failure('NUP 中缺少所需游戏版本。')
+                source = contained(c.library, c.library / package['path'])
+                st.run('解包与合并 '+ver,[d],lambda d=d,ver=ver,source=source:nup.extract(c,source,int(ver[1:]),d),milestone=f'unpack-{index}')
             else:
                 st.run('解包与合并 '+ver,[d],lambda ver=ver,upd=upd: up.extract(c.nx(),c.keys,root/'extract',ver,c.library/base['path'],upd,None,logs,gp,**extraction),milestone=f'unpack-{index}')
         if own:
@@ -382,7 +388,7 @@ def build(c,target='macos'):
         aoc=root/'aoc'; dlcs=[(int(x['titleId'],16),x['version'],c.library/x['path']) for x in g['packages'] if x['type']=='dlc']
         def dlc():
             if g.get('sourceKind')=='dump': dump.extract_dlc(c,[p for p in g['packages'] if p['type']=='dlc'],aoc,gp.id)
-            elif g.get('sourceKind')=='nup': nup.extract_dlc(c,c.library/sources[0]['path'],aoc)
+            elif g.get('sourceKind')=='nup': nup.extract_registered_dlc(c, g['packages'], aoc)
             elif dlcs: up.extract_aoc(c.nx(),c.keys,repo,root,int(gp.id,16),{'dlc':dlcs},logs)
             else: aoc.mkdir(); (aoc/'.empty').write_text('no DLC')
         st.run('处理 DLC',[aoc],dlc,milestone='dlc')

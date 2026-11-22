@@ -344,7 +344,7 @@ final class WorkerOutput: @unchecked Sendable {
         p.allowedContentTypes = ["nsp","xci","nsz","xcz","nup"].compactMap { UTType(filenameExtension:$0) }
         if p.runModal() == .OK { addGames(p.urls) }
     }
-    func addGames(_ urls: [URL]) {
+    func addGames(_ urls: [URL], previousSelections: [String:[String]] = [:]) {
         guard !urls.isEmpty else { return }
         guard !scanningImports, importReview == nil,
               importPrerequisitesReady(requiresKeys:false) else { return }
@@ -353,21 +353,21 @@ final class WorkerOutput: @unchecked Sendable {
         worker("scanImport",extra:["paths":urls.map(\.path)]) { result in
             guard libraryId == self.preferences.libraryId,
                   let entries = Self.decode([ImportPreviewEntry].self,result["entries"]) else { return }
-            self.importReview = ImportReview(libraryId:libraryId, entries:entries)
+            self.importReview = ImportReview(libraryId:libraryId, entries:entries, previousSelections:previousSelections)
         }
     }
 
-    func confirmImport(_ review: ImportReview, paths: Set<String>, prepare: Bool) {
+    func confirmImport(_ review: ImportReview, paths: Set<String>, prepare: Bool, nupSelections: [String:[String]] = [:]) {
         guard importReview?.id == review.id, review.libraryId == preferences.libraryId else { return }
         let selected = review.entries.filter { paths.contains($0.path) && $0.error == nil }
         guard !selected.isEmpty else { return }
         importReview = nil
         guard importPrerequisitesReady(requiresKeys:selected.contains { $0.requiresKeys }) else { return }
-        importGames(selected.map { URL(fileURLWithPath:$0.path) },libraryId:review.libraryId,prepare:prepare)
+        importGames(selected.map { URL(fileURLWithPath:$0.path) },libraryId:review.libraryId,prepare:prepare,nupSelections:nupSelections)
     }
-    private func importGames(_ urls:[URL],libraryId:String,prepare:Bool) {
+    private func importGames(_ urls:[URL],libraryId:String,prepare:Bool,nupSelections:[String:[String]] = [:]) {
         selection = "tasks"
-        worker("import",extra:["paths":urls.map(\.path)]) { result in
+        worker("import",extra:["paths":urls.map(\.path),"nupSelections":nupSelections]) { result in
             guard libraryId == self.preferences.libraryId else { return }
             let ids = Set((result["imports"] as? [[String:Any]] ?? []).compactMap { item in item["duplicate"] as? Bool == false ? item["id"] as? String : nil })
             self.refresh {
@@ -473,7 +473,7 @@ final class WorkerOutput: @unchecked Sendable {
                     if visible { self.refresh() }
                 }
             }
-            if visible { tasks.insert(.init(id:id,operation:operation,state:"running",gameId:extra["gameId"] as? String,started:Date().timeIntervalSince1970,outputPath:extra["outputPath"] as? String,conversion:Self.decode(ConversionJob.self,extra["conversion"]),importPaths:operation == "import" ? extra["paths"] as? [String] : nil,backupId:extra["backupId"] as? String,releaseId:extra["releaseId"] as? String,libraryId:preferences.libraryId),at:0) }
+            if visible { tasks.insert(.init(id:id,operation:operation,state:"running",gameId:extra["gameId"] as? String,started:Date().timeIntervalSince1970,outputPath:extra["outputPath"] as? String,conversion:Self.decode(ConversionJob.self,extra["conversion"]),importPaths:operation == "import" ? extra["paths"] as? [String] : nil,nupSelections:extra["nupSelections"] as? [String:[String]],backupId:extra["backupId"] as? String,releaseId:extra["releaseId"] as? String,libraryId:preferences.libraryId),at:0) }
             callbacks[id] = completion; processes[id] = process
             try process.run()
             if operation == "preflight" {lastWorkerEvent[id]=Date();watchEnvironmentWorker(id)}
@@ -648,7 +648,7 @@ final class WorkerOutput: @unchecked Sendable {
     func retry(_ task: TaskRecord) {
         if task.operation != "convertFiles",let libraryId=task.libraryId,libraryId != preferences.libraryId {error="请切换回任务所属游戏库后重试。";return}
         if task.operation == "convertFiles",let conversion=task.conversion {startConversion(conversion);return}
-        if task.operation == "import",let paths=task.importPaths {addGames(paths.map {URL(fileURLWithPath:$0)});return}
+        if task.operation == "import",let paths=task.importPaths {addGames(paths.map {URL(fileURLWithPath:$0)},previousSelections:task.nupSelections ?? [:]);return}
         guard let game = games.first(where:{$0.id == task.gameId}) else { return }
         if ["compressAssets","uncompressAssets"].contains(task.operation) {setAssetCompression(game,enabled:task.operation=="compressAssets");return}
         if task.operation == "archiveGame" {

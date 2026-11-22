@@ -35,6 +35,7 @@ struct TaskRecord: Codable, Identifiable {
     var outputFiles: [String]?
     var conversion: ConversionJob?
     var importPaths: [String]?
+    var nupSelections: [String:[String]]?
     var archiveRoot: String?
     var backupId: String?
     var releaseId: String?
