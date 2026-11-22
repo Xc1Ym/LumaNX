@@ -349,6 +349,10 @@ def build(c,target='macos'):
         st.run('处理 DLC',[aoc],dlc,milestone='dlc')
         patched=root/('patched_'+gp.get('package')); selected=dirs[gp.get('package')]
         st.run('重写原生代码',[patched],lambda:up.rewrite(sys.executable,repo,selected/'ExeFS',patched,env,logs,gp),milestone='rewrite')
+        # nxnative needs captured runtime NROs to read some RomFS archive indexes.
+        captured_nros = getattr(up, 'captured_nros', None)
+        if captured_nros and (nro_dir := captured_nros(patched)):
+            env = dict(env, DM_NRO_DIR=str(nro_dir))
         if own:
             gp=up.refine_after_rewrite(gp,selected,patched);derived.seal_profile(st,gp)
             if st.graph: st.graph.profile=gp
