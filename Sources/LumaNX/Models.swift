@@ -82,7 +82,7 @@ struct InputConfig: Codable, Equatable {
         return out
     }
 }
-struct Preferences: Codable { var library: String = ""; var libraryId: String = ""; var developerDir = "/Applications/Xcode.app/Contents/Developer"; var onboardingComplete = false; var prepareAfterImport: Bool?; var language: String?; var appearance: String?; var engineDir: String?; var gameLanguage: String?; var gameLanguages: [String:String]?; var conversionOutput:String?; var archiveRoot:String? }
+struct Preferences: Codable { var library: String = ""; var libraryId: String = ""; var developerDir = "/Applications/Xcode.app/Contents/Developer"; var onboardingComplete = false; var prepareAfterImport: Bool?; var language: String?; var appearance: String?; var engineDir: String?; var gameLanguage: String?; var gameLanguages: [String:String]?; var conversionOutput:String?; var archiveRoot:String?; var performanceHUD:Bool?; var recordPerformance:Bool?; var benchmarkLabel:String? }
 
 func keyName(_ b: KeyBinding?) -> String {
     guard let b else { return L("未绑定") }

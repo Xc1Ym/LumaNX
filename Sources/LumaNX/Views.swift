@@ -271,6 +271,20 @@ struct GameDetail: View {
                         Text(L(game.assetCompressionCapable==true ? "可选。游戏运行时按需解压资源，存档单独保存。" : "默认关闭。旧运行版本需要重新准备后才能使用压缩资源。"))
                             .font(.caption).foregroundStyle(.secondary)
                     }
+                    VStack(alignment:.leading,spacing:6) {
+                        Text(L("性能诊断（所有游戏）")).font(.caption.bold())
+                        Toggle(L("性能叠加层（帧率、GPU 时间、内存）"),isOn:Binding(get:{store.preferences.performanceHUD ?? false},set:{store.preferences.performanceHUD=$0;store.savePreferences()}))
+                            .disabled(store.executionBusy || !store.queue.isEmpty)
+                        Toggle(L("记录性能测试"),isOn:Binding(get:{store.preferences.recordPerformance ?? false},set:{store.preferences.recordPerformance=$0;store.savePreferences()}))
+                            .disabled(store.executionBusy || !store.queue.isEmpty)
+                        Text(L("下次启动时生效。记录会保存逐帧计时和报告；比较时请保持相同设置。"))
+                            .font(.caption).foregroundStyle(.secondary)
+                        TextField(L("测试标签（例如：本地压缩）"),text:Binding(get:{store.preferences.benchmarkLabel ?? ""},set:{store.preferences.benchmarkLabel=String($0.prefix(80));store.savePreferences()}))
+                            .textFieldStyle(.roundedBorder).disabled(store.executionBusy || !store.queue.isEmpty)
+                        Button(L("计时面板…")){store.showPerformancePanel(game)}
+                        Button(L("性能报告…")){store.openPerformanceReports(game)}
+                    }
+                    toolDivider
                     Button {store.archiveGame(game)} label:{GameToolLabel(title:"归档到 NAS…",symbol:"externaldrive.badge.plus")}.disabled(store.executionBusy || !store.queue.isEmpty)
                     toolDivider
                 } else if game.archived==true {

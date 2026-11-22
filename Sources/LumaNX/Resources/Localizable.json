@@ -3738,5 +3738,81 @@
   {
     "source": "资源存储偏好已更新。",
     "en": "Asset storage preference updated."
+  },
+  {
+    "source": "性能叠加层（帧率、GPU 时间、内存）",
+    "en": "Performance HUD (FPS, GPU time, memory)"
+  },
+  {
+    "source": "记录性能测试",
+    "en": "Record performance session"
+  },
+  {
+    "source": "下次启动时生效。记录会保存逐帧计时和报告；比较时请保持相同设置。",
+    "en": "Applies on next launch. Recording saves frame timings and reports; use the same settings for comparisons."
+  },
+  {
+    "source": "计时面板…",
+    "en": "Timing panel…"
+  },
+  {
+    "source": "性能报告…",
+    "en": "Performance reports…"
+  },
+  {
+    "source": "性能计时",
+    "en": "Performance timing"
+  },
+  {
+    "source": "手动计时标记",
+    "en": "Manual timing markers"
+  },
+  {
+    "source": "测试阶段",
+    "en": "Section"
+  },
+  {
+    "source": "游戏过程",
+    "en": "Gameplay"
+  },
+  {
+    "source": "加载",
+    "en": "Loading"
+  },
+  {
+    "source": "场景切换",
+    "en": "Transition"
+  },
+  {
+    "source": "可以开始阶段计时",
+    "en": "Ready to time a section"
+  },
+  {
+    "source": "请先启用性能记录并启动游戏",
+    "en": "Launch with session recording enabled first"
+  },
+  {
+    "source": "开始",
+    "en": "Start"
+  },
+  {
+    "source": "停止",
+    "en": "Stop"
+  },
+  {
+    "source": "标记卡顿",
+    "en": "Mark hitch"
+  },
+  {
+    "source": "手动测量包含反应时间。点击此面板不会激活启动器。",
+    "en": "Manual measurements include reaction time. This panel does not activate the launcher when clicked."
+  },
+  {
+    "source": "性能诊断（所有游戏）",
+    "en": "Performance diagnostics (all games)"
+  },
+  {
+    "source": "测试标签（例如：本地压缩）",
+    "en": "Run label (e.g. Local compressed)"
   }
 ]

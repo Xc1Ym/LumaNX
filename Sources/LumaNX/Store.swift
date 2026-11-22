@@ -57,6 +57,7 @@ final class WorkerOutput: @unchecked Sendable {
     let privateRoot: URL
     let resources: URL
     var processes: [String:Process] = [:]
+    var performancePanels: [String:NSPanel] = [:]
     var suspensions: [String:TaskSuspension] = [:]
     var callbacks: [String:([String:Any])->Void] = [:]
     @Published var executionTask: String?
@@ -576,7 +577,7 @@ final class WorkerOutput: @unchecked Sendable {
             }
             return
         }
-        executionTask = worker("launch",extra:["gameId":game.id,"gameLanguage":gameLanguage(for:game.id).rawValue])
+        executionTask = worker("launch",extra:["gameId":game.id,"gameLanguage":gameLanguage(for:game.id).rawValue,"performanceHUD":preferences.performanceHUD ?? false,"recordPerformance":preferences.recordPerformance ?? false,"benchmarkLabel":preferences.benchmarkLabel ?? ""])
     }
     func migrate(_ game: Game) {
         guard !executionBusy else { return }
@@ -740,6 +741,7 @@ final class WorkerOutput: @unchecked Sendable {
     }
     func terminate() {
         processes.values.forEach { if $0.isRunning { $0.terminate() } }
+        performancePanels.values.forEach {$0.close()};performancePanels.removeAll()
         suspensions.values.forEach {$0.resume()};suspensions.removeAll()
     }
 }
