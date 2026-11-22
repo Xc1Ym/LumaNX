@@ -130,6 +130,11 @@ The 1.8.0 dump contained descriptor-shaped payload outside the BAHS binary recor
 
 Mac regression on the M4 Pro with macOS 27.2.1 and Xcode 27.2, 2026-11-19. Both main `79f28b06` and the updated parser on chain `03a3ac831bfb` used the corrected split. All 11,601 shader manifests matched, all 9,591 pipeline interfaces passed, and both revisions completed the 200-second Grand Prix route past its 6,000-frame target.
 
+**Earlier M4 Max run, reported 2026-11-09.** On a 64 GB M4 Max, a derived 1.8.0 build packed with `--platform mac-app --gpu none` reached its first race about 195 s into a 380 s headless route. GPU time in the race was 8.1 ms p50 and 9.7 ms p90. With no bundled pipeline archive, 108 frames waited on first-use compiles, totaling 8.3 s. [PR #2064](https://github.com/seedds/nxnative/pull/2064)
+
+- **Character and kart shadows.** A dark, stair-stepped box appeared under the characters and karts on the title screen. The fix restored generated levels 1 and 2 of the mask array in every tested layer, and the boxes disappeared. [Image views of the type a shader declares](../../../docs/reference/rendering.md#image-views-of-the-type-a-shader-declares)
+- **Night glows.** Headlight and lamp glows shone through buildings when depth pyramid `3738806f0474308c` used the wrong fragment depth register. The reporter verified the corrected occlusion in a night race on Mac with chain `cce725ceabda`. [A pixel shader's depth after a partly written target](../../../docs/reference/shaders.md#a-pixel-shaders-depth-after-a-partly-written-target)
+
 ## Open
 
 - **Long frames:** first-use pipeline compiles (no `pso_manifest.tsv` yet).
@@ -137,6 +142,7 @@ Mac regression on the M4 Pro with macOS 27.2.1 and Xcode 27.2, 2026-11-19. Both 
 - **Mesh draws:** `DrawMeshTasks3D` and the indirect forms are not implemented; no run reached them.
 - `649e36162cad9e79`, a foliage shader with an 8x8 local size, keeps a first-invocation race: its setup loops over a uniform's count, so [the host cannot make it as stores](../../../docs/reference/shaders.md#a-store-only-a-dispatchs-first-invocation-makes). Its list's count read 0 in every one of 7,350 traced title frames, so the race had nothing to act on there; whether that list should be empty is not known.
 - The engine class screen offers 50, 100 and 150cc in this build.
+- **iPhone freeze on 1.8.0:** the app froze twice during scene loads on the reported build, and one freeze ended in a phone restart. See [A residency commit stays blocked in the iPhone kernel](../../../docs/reference/rendering.md#a-residency-commit-stays-blocked-in-the-iphone-kernel).
 
 ## Audio route regression check
 
@@ -154,6 +160,7 @@ Mac regression on the M4 Pro with macOS 27.2.1 and Xcode 27.2, 2026-11-19. Both 
 
 ## Found on this game
 
+- [A residency commit stays blocked in the iPhone kernel](../../../docs/reference/rendering.md#a-residency-commit-stays-blocked-in-the-iphone-kernel) (open).
 - [A timed archive write stalls active presentation](../../../docs/reference/rendering.md#a-timed-archive-write-stalls-active-presentation).
 - [An unregistered NUP build loses its numeric version label](../../../docs/reference/packing.md#an-unregistered-nup-build-loses-its-numeric-version-label).
 - [CPU deswizzle copies use slice and row offsets](../../../docs/reference/nvn-objects.md#cpu-deswizzle-copies-use-slice-and-row-offsets): three sparse terrain textures decoded 12,392 tiles on the replay thread before the grid. With a warm pipeline archive on an M3 Max, the matching load frame took 432–468 ms on `087faba9` and 281–283 ms with the shared row copier (two launches each, reversed order, handheld at 60 fps). It compiled no new pipelines in any of the four launches. Pipeline first-use and other loading stalls remain open.
