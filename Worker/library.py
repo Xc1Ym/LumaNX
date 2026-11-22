@@ -84,8 +84,48 @@ def scan_sources(c):
 
 
 def scan_import(c):
-    files,dumps=scan_sources(c)
-    return {'requiresKeys':any(p.suffix.lower()!='.nup' for p in files),'containers':len(files),'dumps':len(dumps)}
+    """Inspect source metadata without copying or registering game content."""
+    import dump, nup
+    files, dumps = scan_sources(c)
+    entries = []
+    for path in [*files, *dumps]:
+        c.check()
+        folder = path in dumps
+        fmt = 'Dump' if folder else path.suffix[1:].upper()
+        entry = dict(path=str(path), name=path.name, format=fmt,
+                     requiresKeys=fmt not in ('NUP', 'Dump'), packages=[])
+        entries.append(entry)
+        try:
+            if not folder:
+                entry['size'] = path.stat().st_size
+            if fmt == 'NUP':
+                with nup.opened(c, path) as (parser, container):
+                    _, profile, packages = nup.metadata(c, parser, container)
+                    candidates = (k for k in container.packages if k.kind in (parser.BASE, parser.UPDATE) and k.exefs != parser.NO_DIR)
+                    selected = max(candidates, key=lambda k: k.version)
+                    name, display, _ = nup.control_data(c, parser, container, selected)
+                    if display:
+                        newest = max((p for p in packages if p['type'] != 'dlc'), key=lambda p: p['version'])
+                        newest['display'] = display
+                entry['title'] = name or profile['name']
+                entry['requirements'] = requirements(dict(sourceKind='nup', packages=packages), profile)
+            elif folder:
+                _, profile, packages = dump.scan(c, path)
+                entry['title'] = profile['name']
+                entry['requirements'] = requirements(dict(sourceKind='dump', packages=packages), profile)
+            elif fmt in ('NSZ', 'XCZ') or not c.keys.is_file():
+                entry['metadataDeferred'] = True
+                continue
+            else:
+                packages = container_packages(inspect(c, path))
+            entry['packages'] = [
+                {key: package.get(key) for key in ('type', 'version', 'display', 'titleId', 'name')}
+                for package in packages
+            ]
+        except (Failure, OSError) as error:
+            entry['error'] = str(error)
+    return {'requiresKeys': any(e['requiresKeys'] for e in entries), 'containers': len(files),
+            'dumps': len(dumps), 'entries': entries}
 
 
 def import_games(c):

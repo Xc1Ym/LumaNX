@@ -58,7 +58,12 @@ class NupGameTests(unittest.TestCase):
     def game(self): return self.c.catalog()['games'][0]
 
     def test_keyless_preflight_import_metadata_single_managed_copy_and_duplicate(self):
-        self.assertEqual(self.quiet(library.scan_import,self.c),dict(requiresKeys=False,containers=1,dumps=0))
+        preview = self.quiet(library.scan_import, self.c)
+        entries = preview.pop('entries')
+        self.assertEqual(preview, dict(requiresKeys=False, containers=1, dumps=0))
+        self.assertEqual([entry['format'] for entry in entries], ['NUP'])
+        self.assertTrue(any(package['type'] == 'base' for package in entries[0]['packages']))
+        self.assertEqual(self.c.catalog()['games'], [])
         with patch.object(self.c,'nx',side_effect=AssertionError('must not decrypt')): self.imported()
         game=self.game();self.assertEqual(game['sourceKind'],'nup');self.assertEqual(game['missing'],[])
         self.assertEqual(game['name'],'Synthetic Name');self.assertEqual(game['display'],'1.2')

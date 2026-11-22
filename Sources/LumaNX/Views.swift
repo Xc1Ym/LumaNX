@@ -52,6 +52,9 @@ struct ContentView: View {
         }
         .frame(minWidth:1100,minHeight:720)
         .onAppear {store.checkEnvironmentAtStartup()}
+        .sheet(item:$store.importReview,onDismiss:store.applicationSheetDismissed) { review in
+            ImportReviewView(review:review,prepare:store.prepareAfterImport).environmentObject(store)
+        }
         .sheet(isPresented:$store.showOnboarding,onDismiss:store.onboardingDismissed) { OnboardingView().environmentObject(store) }
         .sheet(isPresented:$store.editingInput,onDismiss:store.applicationSheetDismissed) { InputEditor(game:store.inputGame, initial:store.input(for:store.inputGame)).environmentObject(store) }
         .alert(L("操作未完成"),isPresented:Binding(get:{!store.showOnboarding && store.error != nil},set:{if !$0 && !store.showOnboarding {store.error=nil}})) {

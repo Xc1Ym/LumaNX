@@ -3814,5 +3814,25 @@
   {
     "source": "测试标签（例如：本地压缩）",
     "en": "Run label (e.g. Local compressed)"
+  },
+  {
+    "source": "检查要导入的游戏",
+    "en": "Review game imports"
+  },
+  {
+    "source": "请选择要复制到游戏库的文件或文件夹。",
+    "en": "Choose which files or folders to copy into your library."
+  },
+  {
+    "source": "此文件的详细内容将在导入时读取。",
+    "en": "Package details will be read during import."
+  },
+  {
+    "source": "导入后准备游戏",
+    "en": "Prepare games after import"
+  },
+  {
+    "source": "导入所选内容",
+    "en": "Import selected"
   }
 ]

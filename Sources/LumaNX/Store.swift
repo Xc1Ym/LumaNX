@@ -19,6 +19,8 @@ final class WorkerOutput: @unchecked Sendable {
 
 @MainActor final class Store: ObservableObject {
     @Published var preferences = Preferences()
+    @Published var importReview: ImportReview?
+    @Published private(set) var scanningImports = false
     @Published var games: [Game] = []
     @Published var tasks: [TaskRecord] = []
     @Published var conversion = ConversionJob()
@@ -305,7 +307,7 @@ final class WorkerOutput: @unchecked Sendable {
         addGamesAfterOnboarding = false
         // AppKit can ignore terminate while a sheet is attached. Wait for SwiftUI
         // to finish dismissing it, then use the normal delegate/worker shutdown.
-        guard showOnboarding || editingInput || showingRecovery else {
+        guard showOnboarding || editingInput || showingRecovery || importReview != nil else {
             let sheets = NSApp?.windows.compactMap(\.attachedSheet) ?? []
             guard !sheets.isEmpty else { quit(); return }
             for sheet in sheets {sheet.sheetParent?.endSheet(sheet)}
@@ -316,6 +318,7 @@ final class WorkerOutput: @unchecked Sendable {
         showOnboarding = false
         editingInput = false
         showingRecovery = false
+        importReview = nil
     }
     func applicationSheetDismissed() {
         if let quit = quitAfterSheetDismissal {
@@ -343,20 +346,24 @@ final class WorkerOutput: @unchecked Sendable {
     }
     func addGames(_ urls: [URL]) {
         guard !urls.isEmpty else { return }
-        let folders = urls.contains { (try? $0.resourceValues(forKeys:[.isDirectoryKey]).isDirectory) == true }
-        let requiresKeys = !folders && urls.contains { $0.pathExtension.lowercased() != "nup" }
-        guard importPrerequisitesReady(requiresKeys:requiresKeys) else { return }
+        guard !scanningImports, importReview == nil,
+              importPrerequisitesReady(requiresKeys:false) else { return }
         let libraryId = preferences.libraryId
-        let prepare = prepareAfterImport
-        if folders {
-            // The worker shares this recursive classifier with actual import.
-            // Keep potentially large directory scans off the main actor.
-            worker("scanImport",extra:["paths":urls.map(\.path)],visible:false) { result in
-                guard libraryId == self.preferences.libraryId,
-                      self.importPrerequisitesReady(requiresKeys:result["requiresKeys"] as? Bool ?? true) else {return}
-                self.importGames(urls,libraryId:libraryId,prepare:prepare)
-            }
-        } else { importGames(urls,libraryId:libraryId,prepare:prepare) }
+        scanningImports = true
+        worker("scanImport",extra:["paths":urls.map(\.path)]) { result in
+            guard libraryId == self.preferences.libraryId,
+                  let entries = Self.decode([ImportPreviewEntry].self,result["entries"]) else { return }
+            self.importReview = ImportReview(libraryId:libraryId, entries:entries)
+        }
+    }
+
+    func confirmImport(_ review: ImportReview, paths: Set<String>, prepare: Bool) {
+        guard importReview?.id == review.id, review.libraryId == preferences.libraryId else { return }
+        let selected = review.entries.filter { paths.contains($0.path) && $0.error == nil }
+        guard !selected.isEmpty else { return }
+        importReview = nil
+        guard importPrerequisitesReady(requiresKeys:selected.contains { $0.requiresKeys }) else { return }
+        importGames(selected.map { URL(fileURLWithPath:$0.path) },libraryId:review.libraryId,prepare:prepare)
     }
     private func importGames(_ urls:[URL],libraryId:String,prepare:Bool) {
         selection = "tasks"
@@ -440,6 +447,7 @@ final class WorkerOutput: @unchecked Sendable {
                     self.suspensions.removeValue(forKey:id)?.resume()
                     self.processes[id] = nil; try? FileManager.default.removeItem(at:file)
                     if operation=="catalog" {self.catalogWorkers=max(0,self.catalogWorkers-1)}
+                    if operation=="scanImport" {self.scanningImports=false}
                     if operation=="converterStatus" {self.checkingConverter=false}
                     self.lastWorkerEvent[id] = nil
                     if let i = self.tasks.firstIndex(where:{$0.id == id}), self.tasks[i].active {
@@ -472,6 +480,7 @@ final class WorkerOutput: @unchecked Sendable {
         } catch {
             if operation=="converterStatus" {checkingConverter=false}
             if operation=="catalog" {catalogWorkers=max(0,catalogWorkers-1)}
+            if operation=="scanImport" {scanningImports=false}
             self.error = "无法启动本地组件：\(error.localizedDescription)"; processes[id] = nil; callbacks[id] = nil
             let diagnostic=nativeDiagnostic(code:"worker_start_failed",summary:self.error ?? "",detail:error.localizedDescription)
             self.errorDiagnostic=diagnostic
