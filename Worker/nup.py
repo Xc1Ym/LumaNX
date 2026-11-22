@@ -174,7 +174,7 @@ def register(c,path,stage,sha,size):
         if dest.exists():
             if not dest.is_file() or digest(dest,c.progress)!=sha: raise Failure('托管源文件已丢失或内容发生改变，请重新导入。')
         for p in packages:
-            p.update(sourceKind='nup',metadataSchema=2,path=str(dest.relative_to(c.library)),size=size,sha256=sha,name=name)
+            p.update(sourceKind='nup',metadataSchema=2,path=str(dest.relative_to(c.library)),size=size,sha256=sha,name=name,sourceFilename=Path(path).name)
         newest=max((p for p in packages if p['type']!='dlc'),key=lambda p:p['version'])
         if display: newest['display']=display
         duplicate=bool(game and game['packages']==packages)

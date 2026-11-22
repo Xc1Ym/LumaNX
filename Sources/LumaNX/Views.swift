@@ -204,6 +204,12 @@ struct GameDetail: View {
                                             Spacer(minLength:8)
                                             Text(ByteCountFormatter.string(fromByteCount:package.size,countStyle:.file)).fixedSize()
                                         }.font(.caption).foregroundStyle(.secondary)
+                                        if let filename = package.sourceFilename, !filename.isEmpty {
+                                            Text(filename)
+                                                .font(.caption)
+                                                .foregroundStyle(.secondary)
+                                                .textSelection(.enabled)
+                                        }
                                     }.frame(maxWidth:.infinity,alignment:.leading)
                                 }
                             }
