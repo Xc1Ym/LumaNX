@@ -166,9 +166,23 @@ def adapt_snapshot(repo):
             count = 0
             def visit_For(self, node):
                 self.generic_visit(node)
-                if isinstance(node.iter, ast.Tuple) and [getattr(v, 'value', None) for v in node.iter.elts] == ['macosx', 'iphoneos']:
-                    node.iter = ast.parse("('macosx',) if os.environ.get('DM_MAC_ONLY') == '1' else ('macosx', 'iphoneos')", mode='eval').body
-                    self.count += 1
+                iterator = node.iter
+                conditional = (isinstance(iterator, ast.IfExp)
+                               and isinstance(iterator.orelse, ast.Tuple) and not iterator.orelse.elts)
+                platforms = iterator.body if conditional else iterator
+                if not isinstance(platforms, ast.Tuple) or [getattr(v, 'value', None) for v in platforms.elts] != ['macosx', 'iphoneos']:
+                    return node
+                selected = ast.IfExp(
+                    test=ast.parse("os.environ.get('DM_MAC_ONLY') == '1'", mode='eval').body,
+                    body=ast.Tuple(elts=[ast.Constant(value='macosx')], ctx=ast.Load()),
+                    orelse=platforms,
+                )
+                if conditional:
+                    # Upstream may disable Metal probes altogether.
+                    iterator.body = selected
+                else:
+                    node.iter = selected
+                self.count += 1
                 return node
         rewrite = MacOnly(); tree = rewrite.visit(tree)
         if rewrite.count != 1: raise Failure('所选 nxnative 的 Metal 工具链接口不兼容。')
