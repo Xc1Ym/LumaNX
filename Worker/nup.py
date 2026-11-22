@@ -56,6 +56,7 @@ def metadata(c, parser, n):
     profile=profiles(c.engine).get(tid)
     if not profile: raise Failure('已解包游戏需要 nxnative 已适配的游戏配置。')
     packages=[]
+    module_ids = {}
     for version,k in ([(0,base)] if base is not None else [])+sorted(updates.items()):
         # NUP producers use either the application ID (upstream fixtures) or
         # the update title ID. Both must identify this application's family.
@@ -64,10 +65,17 @@ def metadata(c, parser, n):
         if k.exefs==parser.NO_DIR: raise Failure('解包目录缺少有效的 NSO 代码模块。')
         builds={}
         for name,isdir,i in n.children(k.exefs):
-            if isdir or i in n.verified_files: continue
-            data=Prefix(c,0x100);n.copy(i,data)
-            if len(data.data)==0x100 and data.data[:4]==b'NSO0': builds[os.fsdecode(name)]=data.data[0x40:0x50].hex()
-        if any(m not in builds for m in profile.get('modules','main').split()):
+            if isdir or (i in n.verified_files and i not in module_ids): continue
+            if i not in module_ids:
+                data=Prefix(c,0x100);n.copy(i,data)
+                module_ids[i] = data.data[0x40:0x50].hex() if len(data.data)==0x100 and data.data[:4]==b'NSO0' else None
+            if module_ids[i] is not None:
+                builds[os.fsdecode(name)] = module_ids[i]
+        # A profile can list modules from multiple versions. Registered build
+        # rows describe the code each individual package actually ships.
+        registered = profile['builds'].get(f'v{version}', {})
+        required = {'main'} | (set(registered) - {'display'})
+        if not required.issubset(builds):
             raise Failure('解包目录缺少有效的 NSO 代码模块。')
         # Check the profile marker without unpacking a potentially huge RomFS.
         directory=parser.romfs_of(k,base)
