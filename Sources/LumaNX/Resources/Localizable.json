@@ -3926,5 +3926,17 @@
   {
     "source": "来自文件名",
     "en": "From filename"
+  },
+  {
+    "source": "移回此 Mac",
+    "en": "Move back to Mac"
+  },
+  {
+    "source": "NAS 存储",
+    "en": "NAS storage"
+  },
+  {
+    "source": "校验并启用本地副本，保留 NAS 副本。",
+    "en": "Verify and activate a local copy. The NAS copy is kept."
   }
 ]

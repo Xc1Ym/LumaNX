@@ -38,12 +38,16 @@ import AppKit
         guard alert.runModal() == .alertFirstButtonReturn else { return }
         runtimeTransfer("publishNAS",game:game,extra:["archiveRoot":url.path])
     }
+    func moveNASGameBackToMac(_ game: Game) {
+        guard game.playingFromNAS == true, !executionBusy, queue.isEmpty else { return }
+        runtimeTransfer("restoreNAS",game:game)
+    }
     func restoreGame(_ game:Game) {
         guard game.archived==true else {return}
         runtimeTransfer("restoreGame",game:game)
     }
     func runtimeTransfer(_ operation:String,game:Game,extra:[String:Any]=[:]) {
-        guard !executionBusy,queue.isEmpty,["archiveGame","restoreGame","publishNAS"].contains(operation) else {return}
+        guard !executionBusy,queue.isEmpty,["archiveGame","restoreGame","publishNAS","restoreNAS"].contains(operation) else {return}
         let libraryId=preferences.libraryId
         var request=extra;request["gameId"]=game.id
         selection="tasks"

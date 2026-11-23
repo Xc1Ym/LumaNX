@@ -39,7 +39,7 @@ def main():
         ops['exportIPA'] = ipa.export
         ops['benchmarkMarker'] = performance.marker
         ops.update(compressAssets=asset_storage.compress,uncompressAssets=asset_storage.uncompress)
-        ops.update(archiveGame=runtime_archive.archive,restoreGame=runtime_archive.restore,publishNAS=nas_play.publish)
+        ops.update(archiveGame=runtime_archive.archive,restoreGame=runtime_archive.restore,publishNAS=nas_play.publish,restoreNAS=nas_play.restore_local)
         ops.update(backupSave=recovery.backup,restoreSave=recovery.restore,listRecovery=recovery.list_recovery,activateRelease=recovery.activate)
         ops.update(convertFiles=conversion.convert,converterStatus=conversion.status,conversionKeys=conversion.import_keys)
         if request['operation'] not in ops: raise Failure('不支持的任务类型。')

@@ -288,30 +288,43 @@ struct GameDetail: View {
                         Text(L(game.assetCompressionCapable==true ? "可选。游戏运行时按需解压资源，存档单独保存。" : "默认关闭。旧运行版本需要重新准备后才能使用压缩资源。"))
                             .font(.caption).foregroundStyle(.secondary)
                     }
-                    VStack(alignment:.leading,spacing:6) {
-                        Text(L("性能诊断（所有游戏）")).font(.caption.bold())
-                        Toggle(L("性能叠加层（帧率、GPU 时间、内存）"),isOn:Binding(get:{store.preferences.performanceHUD ?? false},set:{store.preferences.performanceHUD=$0;store.savePreferences()}))
-                            .disabled(store.executionBusy || !store.queue.isEmpty)
-                        Toggle(L("记录性能测试"),isOn:Binding(get:{store.preferences.recordPerformance ?? false},set:{store.preferences.recordPerformance=$0;store.savePreferences()}))
-                            .disabled(store.executionBusy || !store.queue.isEmpty)
-                        Text(L("下次启动时生效。记录会保存逐帧计时和报告；比较时请保持相同设置。"))
-                            .font(.caption).foregroundStyle(.secondary)
-                        TextField(L("测试标签（例如：本地压缩）"),text:Binding(get:{store.preferences.benchmarkLabel ?? ""},set:{store.preferences.benchmarkLabel=String($0.prefix(80));store.savePreferences()}))
-                            .textFieldStyle(.roundedBorder).disabled(store.executionBusy || !store.queue.isEmpty)
-                        Button(L("计时面板…")){store.showPerformancePanel(game)}
-                        Button(L("性能报告…")){store.openPerformanceReports(game)}
-                    }
+                    DisclosureGroup {
+                        VStack(alignment:.leading,spacing:6) {
+                            Toggle(L("性能叠加层（帧率、GPU 时间、内存）"),isOn:Binding(get:{store.preferences.performanceHUD ?? false},set:{store.preferences.performanceHUD=$0;store.savePreferences()}))
+                                .disabled(store.executionBusy || !store.queue.isEmpty)
+                            Toggle(L("记录性能测试"),isOn:Binding(get:{store.preferences.recordPerformance ?? false},set:{store.preferences.recordPerformance=$0;store.savePreferences()}))
+                                .disabled(store.executionBusy || !store.queue.isEmpty)
+                            Text(L("下次启动时生效。记录会保存逐帧计时和报告；比较时请保持相同设置。"))
+                                .font(.caption).foregroundStyle(.secondary)
+                            TextField(L("测试标签（例如：本地压缩）"),text:Binding(get:{store.preferences.benchmarkLabel ?? ""},set:{store.preferences.benchmarkLabel=String($0.prefix(80));store.savePreferences()}))
+                                .textFieldStyle(.roundedBorder).disabled(store.executionBusy || !store.queue.isEmpty)
+                            Button(L("计时面板…")){store.showPerformancePanel(game)}
+                            Button(L("性能报告…")){store.openPerformanceReports(game)}
+                        }.padding(6).background(.primary.opacity(0.025))
+                    } label: {
+                        GameToolLabel(title:"性能诊断（所有游戏）",symbol:"gauge.with.dots.needle.67percent")
+                    }.disclosureGroupStyle(GameToolDisclosureStyle())
                     toolDivider
-                    if game.playingFromNAS == true {
-                        Label(L("直接从 NAS 游玩"),systemImage:"externaldrive.connected.to.line.below")
-                    } else {
-                        Button {store.publishPlayableGame(game)} label:{GameToolLabel(title:"移至 NAS 并直接游玩",symbol:"externaldrive.connected.to.line.below")}
+                }
+                if game.ready == true || game.archived == true {
+                    DisclosureGroup {
+                        VStack(alignment:.leading,spacing:4) {
+                            if game.playingFromNAS == true {
+                                Label(L("直接从 NAS 游玩"),systemImage:"externaldrive.connected.to.line.below")
+                                    .font(.caption).foregroundStyle(.secondary)
+                                Button {store.moveNASGameBackToMac(game)} label:{GameToolLabel(title:"移回此 Mac",symbol:"arrow.down.to.line")}
+                                    .help(L("校验并启用本地副本，保留 NAS 副本。"))
+                            } else if game.archived == true {
+                                Button {store.restoreGame(game)} label:{GameToolLabel(title:"恢复到本地",symbol:"arrow.down.to.line")}
+                            } else {
+                                Button {store.publishPlayableGame(game)} label:{GameToolLabel(title:"移至 NAS 并直接游玩",symbol:"externaldrive.connected.to.line.below")}
+                                Button {store.archiveGame(game)} label:{GameToolLabel(title:"归档到 NAS…",symbol:"externaldrive.badge.plus")}
+                            }
+                        }.padding(6).background(.primary.opacity(0.025))
                             .disabled(store.executionBusy || !store.queue.isEmpty)
-                        Button {store.archiveGame(game)} label:{GameToolLabel(title:"归档到 NAS…",symbol:"externaldrive.badge.plus")}.disabled(store.executionBusy || !store.queue.isEmpty)
-                    }
-                    toolDivider
-                } else if game.archived==true {
-                    Button {store.restoreGame(game)} label:{GameToolLabel(title:"恢复到本地",symbol:"arrow.down.to.line")}.disabled(store.executionBusy || !store.queue.isEmpty)
+                    } label: {
+                        GameToolLabel(title:"NAS 存储",symbol:"externaldrive")
+                    }.disclosureGroupStyle(GameToolDisclosureStyle())
                     toolDivider
                 }
                 DisclosureGroup {

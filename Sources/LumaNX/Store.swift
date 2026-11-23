@@ -399,7 +399,7 @@ final class WorkerOutput: @unchecked Sendable {
             self.hasImportedKeys = keys["ready"] as? Bool == true
             self.keyStatus = keys["message"] as? String ?? "尚未导入 prod.keys"
             if let records = Self.decode([TaskRecord].self,r["jobs"]) {
-                for rec in records where rec.state=="failed" || ["archiveGame","restoreGame","publishNAS","backupSave","restoreSave","activateRelease","setup","clean","remove","diagnostics","prepareEngine","import","build","exportIPA","convertFiles","launch","migrate","keys","installMetal","uninstallMetal"].contains(rec.operation) {
+                for rec in records where rec.state=="failed" || ["archiveGame","restoreGame","publishNAS","restoreNAS","backupSave","restoreSave","activateRelease","setup","clean","remove","diagnostics","prepareEngine","import","build","exportIPA","convertFiles","launch","migrate","keys","installMetal","uninstallMetal"].contains(rec.operation) {
                     if !self.deletedTaskIDs.contains(rec.id),!self.tasks.contains(where: { $0.id == rec.id }) { self.tasks.append(rec) }
                 }
                 self.tasks.sort { ($0.started ?? 0) > ($1.started ?? 0) }
@@ -657,6 +657,7 @@ final class WorkerOutput: @unchecked Sendable {
             else {archiveGame(game)}
         }
         else if task.operation == "restoreGame" {restoreGame(game)}
+        else if task.operation == "restoreNAS" {moveNASGameBackToMac(game)}
         else if task.operation == "backupSave" { performRecovery("backupSave",game:game) }
         else if task.operation == "restoreSave" {
             if let id=task.backupId {performRecovery("restoreSave",game:game,extra:["backupId":id])}

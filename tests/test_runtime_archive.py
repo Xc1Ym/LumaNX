@@ -83,6 +83,31 @@ class RuntimeArchiveTests(unittest.TestCase):
         self.assertNotIn('nasRuntime', self.c.game())
         self.assertEqual(self.saved(), b'keep my save')
 
+    def test_move_back_verifies_existing_nas_snapshot_before_local_activation(self):
+        import nas_play
+        from incremental import runtime_inventory
+
+        manifest_path = self.runtime / 'manifest.json'
+        manifest = json.loads(manifest_path.read_text())
+        manifest['artifacts'] = runtime_inventory(self.c, self.runtime)
+        atomic(manifest_path, manifest)
+        self.archive.mkdir()
+        published = self.quiet(nas_play.publish, self.c)
+        remote = Path(published['path'])
+        assets = remote / 'romfs/assets'
+        original = assets.read_bytes()
+        assets.write_bytes(b'Z' * len(original))
+        with self.assertRaisesRegex(Failure, 'failed verification'):
+            self.quiet(nas_play.restore_local, self.c)
+        self.assertFalse((self.local / 'current').exists())
+        self.assertEqual(self.saved(), b'keep my save')
+        assets.write_bytes(original)
+        result = self.quiet(nas_play.restore_local, self.c)
+        self.assertTrue(result['nasCopyKept'])
+        self.assertTrue(remote.is_dir())
+        self.assertEqual((self.local / 'current/romfs/assets').read_bytes(), original)
+        self.assertEqual(self.saved(), b'keep my save')
+
     def test_archive_restore_round_trip_without_sources_or_build_cache(self):
         result=self.quiet(runtime_archive.archive,self.c)
         entry=result['archive'];archived=Path(entry['path'])
