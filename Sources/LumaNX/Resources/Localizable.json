@@ -3910,5 +3910,21 @@
   {
     "source": "请选择已挂载的 NAS 共享文件夹。",
     "en": "Choose a mounted NAS share."
+  },
+  {
+    "source": "运行版本 %@",
+    "en": "Runtime %@"
+  },
+  {
+    "source": "已导入更新 %@",
+    "en": "Imported update %@"
+  },
+  {
+    "source": "已导入本体 %@",
+    "en": "Imported base %@"
+  },
+  {
+    "source": "来自文件名",
+    "en": "From filename"
   }
 ]

@@ -7,6 +7,26 @@ struct NSPPackage: Codable, Identifiable {
     var titleId: String; var baseId: String; var version: Int; var type: String; var name: String; var display: String
     var path: String; var size: Int64; var sha256: String; var builds: [String:String]
     var sourceFilename: String?
+
+    var retailVersion: (value: String, fromFilename: Bool)? {
+        let metadata = display.trimmingCharacters(in:.whitespacesAndNewlines)
+        if let version = Self.versionMatch(in:metadata, pattern:#"^[vV]?(\d+\.\d+(?:\.\d+){0,2})$"#) {
+            return (version, false)
+        }
+        guard let sourceFilename else { return nil }
+        if let version = Self.versionMatch(in:sourceFilename,pattern:#"[\[(][vV]?(\d+\.\d+(?:\.\d+){0,2})[\])]"#) {
+            return (version, true)
+        }
+        return nil
+    }
+
+    private static func versionMatch(in text:String, pattern:String) -> String? {
+        guard let regex = try? NSRegularExpression(pattern:pattern),
+              let match = regex.firstMatch(in:text,range:NSRange(text.startIndex...,in:text)),
+              let range = Range(match.range(at:1),in:text) else { return nil }
+        return String(text[range])
+    }
+
     var kindName: String { ["base":L("本体"),"update":L("更新"),"dlc":"DLC"][type] ?? L("未知内容") }
 }
 struct Game: Codable, Identifiable {
@@ -23,6 +43,16 @@ struct Game: Codable, Identifiable {
     var archiveSize: Int64?
     var restoreSize: Int64?
     var sourceKind: String?
+    var importedRetailVersion: (value: String, fromFilename: Bool, isUpdate: Bool)? {
+        let candidates = packages.filter { $0.type == "update" || $0.type == "base" }
+            .sorted { $0.version > $1.version }
+        for package in candidates {
+            if let version = package.retailVersion {
+                return (version.value, version.fromFilename, package.type == "update")
+            }
+        }
+        return nil
+    }
     var canExportIPA: Bool { sourceKind != "dump" && sourceKind != "nup" }
     var compatibilityName: String { ["startup":L("仅验证启动"),"verified":L("Mac 已验证"),"experimental":L("实验性"),"unsupported":L("暂不支持")][compatibility ?? "unsupported"] ?? L("实验性") }
     var buildable: Bool { compatibility != "unsupported" && (buildMissing ?? missing ?? []).isEmpty }

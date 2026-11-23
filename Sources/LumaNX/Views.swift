@@ -102,7 +102,15 @@ struct ContentView: View {
                                 GameCover(game:game).frame(width:76,height:76).clipShape(RoundedRectangle(cornerRadius:12)).accessibilityHidden(true)
                                 VStack(alignment:.leading,spacing:8) {
                                     Text(game.name).font(.headline).lineLimit(2)
-                                    Text(game.display.isEmpty ? L("版本待识别") : game.display).font(.caption).foregroundStyle(.secondary)
+                                    let runtime = game.runtimeVersion.flatMap { $0.isEmpty ? nil : $0 }
+                                    Text(runtime.map { String(format:L("运行版本 %@"),$0) } ?? (game.display.isEmpty ? L("版本待识别") : game.display))
+                                        .font(.caption).foregroundStyle(.secondary)
+                                    if let retail = game.importedRetailVersion {
+                                        let format = retail.isUpdate ? L("已导入更新 %@") : L("已导入本体 %@")
+                                        let label = String(format:format,retail.value)
+                                        Text(retail.fromFilename ? label + " · " + L("来自文件名") : label)
+                                            .font(.caption).foregroundStyle(.secondary)
+                                    }
                                 }
                                 Spacer()
                                 Image(systemName:game.ready == true ? "checkmark.circle.fill" : "arrow.down.circle").foregroundStyle(game.ready == true ? .teal : .secondary)
