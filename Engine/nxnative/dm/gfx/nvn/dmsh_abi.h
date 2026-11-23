@@ -31,6 +31,8 @@
 #define DMSH_C0_SSBO_MS 0x770            // NVN2 mesh stage storage buffer table: its mesh shaders read c0 0x770, 0x780, 0x790 and 0x7b0, and it binds slots from 0
 #define DMSH_MESH_DRAW_SLOT 29           // a task or object function's buffer: the draw's {count, first} workgroups, NVN's DrawMeshTasksIndirect record (dmsh_meshstage.py, nvn_geometry.inc mtk_encode)
 #define DMSH_MESH_GRID 1024              // Metal's limit of threadgroups in a mesh grid: a mesh shader with no task shader is drawn by an object function launching blocks of this many (dmsh_meshstage.py)
+#define DMSH_MESH_PAYLOAD_MAX 16384      // Metal's limit of an object function's payload: a task shader's larger payload goes through a device buffer (dmsh_meshstage.py payload_spill)
+#define DMSH_MESH_SPILL_SLOT 11          // that buffer, at this index of the object and vertex (mesh) tables: word 0 its slice count, then one slice of the payload's words rounded to 4 per task workgroup (nvn_geometry.inc mtk_encode)
 // A mesh function whose stage array is 6000 to 16384 bytes (a 32-thread group; dmsh_meshstage.py to_stage, reflection key mesh_spill) keeps it in a device slice, not in threadgroup memory:
 // buffer DMSH_MESH_SCRATCH_SLOT of the mesh stage, which shares the vertex argument table. A mesh draw binds slot 0 (the arguments) and this one; vertex draws use the others (1-12
 // converted streams, 8-11 transform feedback, 12-13 geometry, 14-29 streams, 30 the zero buffer) and rebind what they read, as nvn_mtl.m enc_r_vbuf tracks every write.
@@ -194,6 +196,10 @@
 // The corrections' function constant (bool, every stage): true turns them off, for a pipeline whose draw or dispatch binds no sampler with a
 // twin (nvn_mtl.m border_need, fn_off). The twin samples go, and the registers they kept: Ocarina of Time's 1080p material passes spilled 300-400 bytes a thread with them. Undefined, every sample corrects as its bit says
 #define DMSH_BORDER_FC 216
+// The blend fix-up's function constant (bool, pixel shaders with dm_blend0, dmsh_rewrite.py blend_zero): true for a pipeline whose blend words are both 0 (nvn_mtl.m bz_word_for /
+// rop_word_for: no zero-weight NaN rule and no NVIDIA rounding for any of its targets), so the fix-up and the read of its words go. False or undefined, the words are read at
+// DMSH_BLEND_BUFFER as before (pair archives keep false so one pulling base serves every draw of a shader pair)
+#define DMSH_BLEND_OFF_FC 217
 // The logic operation's state (dm/gfx/tools/dmsh_logic.py, the _l entry points of the <key>_bx libraries): uint operation (NVN_LOGIC_OP_*), 12 bytes of padding, a uint4 channel mask per colour target, at this fragment buffer index (nvn_mtl.m lo_bind)
 #define DMSH_LOGIC_BUFFER 29
 // Its function constants: bool, colour target n is attached (the variant reads it only then), at this index + n (nvn_mtl.m lo_fn specializes the entry point per pass's targets)

@@ -1770,6 +1770,13 @@ The replay on Metal (`dm/gfx/nvn/nvn_mtl.m`) and the Vulkan and OpenGL layers. E
 - **Found on:** [Metroid Dread](../../dm/games/010093801237C000/README.md).
 - **Note:** 04's Metroid Dread section (at `6a06877`) still described the old behaviour ("every copy or update ends the host's render pass"); the deferral came later (development.md's Power section), and it is now the default (`ubd_on` in `nvn_mtl.m`, off with `DM_NVN_UB_DEFER=0`).
 
+### Deferred inline updates reach geometry-stage mesh bindings
+
+- **Symptom:** an inline buffer update is applied after a geometry shader running as a mesh draw, so the shader sees stale uniforms, storage data or indices, or its storage writes are overwritten at the end of the render pass.
+- **Cause:** `geo_mesh_draw` passes a synthetic vertex/fragment-only program and `di = NULL` to the normal draw path. Its deferred-update conflict check therefore cannot see the lean geometry kernel's stage-2 buffer bindings or an indexed draw's index buffer, even though the mesh function reads both.
+- **Fix:** before the synthetic draw, check the selected lean kernel's stage-2 bindings (`ubd_conflict_sh`) and any indexed draw's index buffer range (`ubd_hits`), landing conflicting updates before encoding the mesh draw. Non-conflicting updates and uniform reads that can use a complete or partial shadow keep their deferral. The compute fallback already lands updates before its geometry dispatch.
+- **Found on:** the stage-2 uniform conflict reported in [Wolfenstein: Youngblood, issue #1314](https://github.com/seedds/nxnative/issues/1314); reproduced independently in `check_t_geometry_mesh` with geometry-stage storage counters and indexed mesh draws (the game's profile and remaining visual issues remain open).
+
 ### Partial-cover uniform shadows keep passes open
 
 - **Symptom:** hundreds of render passes a frame and heavy attachment traffic when a game updates a small part of a large uniform block before each draw group.
@@ -1891,6 +1898,14 @@ The replay on Metal (`dm/gfx/nvn/nvn_mtl.m`) and the Vulkan and OpenGL layers. E
 - **Fix:** `TiledDownsample` and `TiledDownsampleTextureView` use the same recorded resolve as their ordinary counterparts. Texture descriptors and the selected views are copied when recorded; the resolve runs in submission order. Tegra tiled-cache scheduling hints remain host no-ops. This adds no new format, size-conversion or sample-count support to the existing resolve path.
 - **Found on:** Ikaruga 1.0.2, reported by [hada0127 in issue #592](https://github.com/seedds/nxnative/issues/592), with a [source-only patch](https://gist.github.com/hada0127/5cf963267ae4e0da47ecf8e150c7bdf6). The report's independent SDK audio-layout failure is separate. No repository game profile or current gameplay validation is provided by this change.
 
+### Multisample `Downsample` between different sizes
+
+- **Symptom:** `[RED] Downsample case not implemented: 1920x1080 4 samples format 92 → 1280x720 1 samples format 92`; handheld mode renders black while docked mode works.
+- **Cause:** Metal requires a render pass's `resolveTexture` to match the multisample source attachment's dimensions, so `copy_t2t_enc` (`DM_COPY_RESOLVE`) rejected multisample resolves when the source and destination level sizes differed. A game that allocates its MSAA render target at docked size (`1920x1080`) and renders handheld frames into the `1280x720` corner hits this path on `nvnCommandBufferDownsample`.
+- **Fix:** when `s.sampleCount > 1`, `d.sampleCount == 1`, `s.pixelFormat == d.pixelFormat`, and the source and destination level sizes differ, `copy_t2t_enc` resolves into a cached private staging texture matching `(sw, sh, pf)` (up to 4 slots, deferred release on eviction) and blits the common `(0, 0, min(sw, dw), min(sh, dh))` corner unscaled into the destination.
+- **Found on:** [Digimon Story Time Stranger](../../dm/games/010062E01FE0C000/README.md) ([issue #872](https://github.com/seedds/nxnative/issues/872)): handheld mode (`DM_OPMODE=0`) resolves `1920x1080` 4x `RG11B10Float` into `1280x720` 1x every frame.
+- **Check:** `make -C dm/gfx/tests GAME=010015100B514000 check_t_tiled_resolve` (97 checks under `MTL_DEBUG_LAYER=1` for both `DM_NVN_ENC_THREAD=0` and `1`, including `16x12` 4x → `8x6` 1x and `8x6` 4x → `16x12` 1x unscaled corner checks).
+
 ### Depth-stencil copies carry the stencil
 
 - **Symptom:** no ambient occlusion (Mac); on a device the result depends on whatever that memory holds.
@@ -1963,6 +1978,14 @@ The replay on Metal (`dm/gfx/nvn/nvn_mtl.m`) and the Vulkan and OpenGL layers. E
 - **Fix:** only timestamp reports are kept per submission, and the query addresses, which are kept apart, are enough for those; both tables grow (`rc_note`, `rc_occ_add`).
 - **Found on:** [Splatoon Raiders](../../dm/games/0400380020056000/README.md): 285 ink queries a frame in its dialogue scene came before the conditional clears, and the lit scene was wiped: a black screen with only the text on it. The opening cutscene has no such queries, and the pier about 160.
 - **Check:** `make -C dm/gfx/tests GAME=<id> check_t_sbw`.
+
+### Running-write hash collisions and page-set overflow taint conditional renders
+
+- **Symptom:** random or sustained black 3D frames while the 2D HUD keeps drawing in busy or wide-view scenes, with no `[RED]` lines; `DM_NVN_ENC_THREAD=1` turns flickering into multi-second black screens, and restarting the game can change whether a session hits it.
+- **Cause:** two limits in `nvn_mtl.m`'s GPU write-hazard tables gave false `gw_live` / `g_sbw_over` hits in `rc_source()` ([A condition on a word the GPU writes](#a-condition-on-a-word-the-gpu-writes)), making `OP_RENDER_COND` treat `agl`'s CPU-written conditional-render reference word (`rec + 16`) as unknown so its `ClearColor` wiped the 3D composite target before the upscaler read it: (1) the direct-mapped running-write tables (`g_gw`, `g_gwx`, `g_gwr`) collapsed a slot's page tag to `~0ull` on any 2-page hash collision, and any later write to a single hot page in that slot while `fence > done` kept `~0ull` latched permanently until a full GPU drain (continuous with the encode thread); (2) the per-submission page set (`g_sbwp`) was fixed at 16,384 slots (and 64 wide intervals), overflowing on high-draw scenes with thousands of writable storage buffers and setting `g_sbw_over` / `g_gw_all` (which also refused `ubp_get` partial uniform shadows).
+- **Fix:** replace the direct-mapped running-write tables with 128-byte-aligned 7-way set-associative tables with an independent per-set `over_fence` that later non-overflowing writes never extend, merge `g_gw` into `g_gwx` plus a `g_um` page check (`um_page_live`), size `g_gwr` as a compact 1,024-set filter for the 4,096-entry report ring, grow `g_sbwp` / `g_sbw_list` dynamically at ≤50% load from 16,384 slots (`sbw_grow`), and widen `SBW_WN` to 256.
+- **Found on:** [Donkey Kong Bananza](../../dm/games/040074A01BF12000/README.md) ([issue #2699](https://github.com/seedds/nxnative/issues/2699), [PR #3185](https://github.com/seedds/nxnative/pull/3185)): Freezer / Hilltop / Canyon layers, wide camera angles, and the 3D overview map (~7,500 terrain chunks binding ~15 KB writable SSBOs per submission).
+- **Check:** `make -C dm/gfx/tests GAME=<id> check_t_sbw` (7-way collision without tainting an unrelated page, non-latching `over_fence` expiration, `g_um` live-page tracking outside `g_gwx`, and 24,000-page dynamic growth without `g_sbw_over` or `g_gw_all`).
 
 ### Query slots running out inside a pass
 
@@ -2562,11 +2585,27 @@ Digimon Story Cyber Sleuth: Complete Edition (Media.Vision's MVGL engine, SDK 6.
 
 ### Desktop GLSL 1.10 and 1.20 from runtime generators
 
-- **Symptom:** captured desktop GLSL fails with `Desktop shaders for Vulkan SPIR-V require version 140 or higher` or with an undeclared `gl_TexCoord` or `gl_Color`.
-- **Cause:** MojoShader emits desktop compatibility GLSL 1.20 and names its built-in varyings through macros.
-- **Fix:** promote explicit desktop versions 110 and 120 through the existing GLSL ES 1.00 compatibility rewrite. After preprocessing, make the front colors, fog coordinate and constant-index texture coordinates explicit, with matching names across stages. Constant-index fragment outputs keep their locations.
-- **Limits:** this covers the programmable varyings used by MojoShader. Fixed-function vertex inputs, back-face color selection and dynamically indexed legacy arrays are outside this path.
-- **Found on:** Timespinner 1.0.0 ([PR #1864](https://github.com/seedds/nxnative/pull/1864)).
+- **Symptom:** captured desktop GLSL fails with `Desktop shaders for Vulkan SPIR-V require version 140 or higher`, an undeclared `gl_TexCoord` or `gl_Color`, `cannot convert from 'const int' to 'temp highp float'`, or `sampler/image : type requires declaration of default precision qualifier` on `sampler3D` / `texture3D`.
+- **Cause:** legacy desktop GLSL (`#version 110`/`120`/`130`) relies on `attribute`, `varying`, `gl_FragColor`, `texture3D*`, implicit `int`-to-`float` conversions, and desktop samplers without ES precision qualifiers; promoting it to `#version 310 es` rejected desktop implicit conversions and `sampler3D`.
+- **Fix:** promote explicit desktop versions 110, 120 and 130 to `#version 450 core` (while keeping unversioned / `#version 100` on `#version 310 es`) and rewrite `texture3D`/`texture3DLod`/`texture3DProj` in `OLD_TEX`. After preprocessing, make the front colors, fog coordinate and constant-index texture coordinates explicit, with matching names across stages. Constant-index fragment outputs keep their locations.
+- **Limits:** this covers the programmable varyings used by MojoShader and desktop `#version 120` renderers. Fixed-function vertex inputs, back-face color selection and dynamically indexed legacy arrays are outside this path.
+- **Found on:** Timespinner 1.0.0 ([PR #1864](https://github.com/seedds/nxnative/pull/1864)) and Darkest Dungeon ([PR #2034](https://github.com/seedds/nxnative/pull/2034), [issue #3021](https://github.com/seedds/nxnative/issues/3021)).
+
+### Explicit sampler `layout(binding)` and `GL_TEXTURE_SWIZZLE_RGBA`
+
+- **Symptom:** multi-planar movie shaders that declare `layout(binding = 0)` / `layout(binding = 1)` without calling `glUniform1i` sample every plane from texture unit 0 (green NV12 video), and `glTexParameteriv(..., GL_TEXTURE_SWIZZLE_RGBA, ...)` logs `[RED] glTexParameter(0x8e46) not implemented`.
+- **Cause:** `gl_shaders.py` did not record explicit GLSL `layout(binding = N)` sampler units in `gl_shaders.tsv`, so `glLinkProgram` always initialized every sampler to unit 0; `hle_gl.m` handled individual `GL_TEXTURE_SWIZZLE_R..A` parameters but not the 4-component `GL_TEXTURE_SWIZZLE_RGBA` vector form.
+- **Fix:** `gl_shaders.py` records non-zero explicit `layout(... binding = N ...)` sampler bindings as an optional fifth colon-separated field on `t:` rows (leaving unqualified samplers at 0, distinct from glslang `--amb` auto-assignments), and `glLinkProgram` initializes `u->unit` from that field. `glTexParameteriv` and `glTexParameterfv` apply `GL_TEXTURE_SWIZZLE_RGBA` across all four channels.
+- **Check:** `test_gl_shaders.py` and `make -C dm/gfx/tests GAME=010014E00DB56000 gl-imports gl-arguments`.
+- **Found on:** Darkest Dungeon ([PR #2034](https://github.com/seedds/nxnative/pull/2034), [issue #3021](https://github.com/seedds/nxnative/issues/3021)).
+
+### Embedded `main` GLSL or `.glsl` templates suppressing `DM_GL_CAPTURE`
+
+- **Symptom:** an OpenGL game boots with audio and advancing frames but shows a black screen, logging only a few shader table entries (from `main`) and `[RED] vertex/fragment shader <key> is not in the library (DM_GL_CAPTURE collects it)` for its game shaders.
+- **Cause:** `profile_guess.py` turned `gl_capture` off whenever `main` contained any embedded GLSL string (`gl_src > 0`) or the RomFS contained any `.glsl` filename by extension alone, and `build_ipa_from_nsp.py` did not fall back to capture when offline `.glsl` files failed to translate standalone or when a profile provided `gl_capture.tsv`.
+- **Fix:** `profile_guess.py` only suppresses `gl_capture` when standalone RomFS shader files are present (ignoring `gl_src` alone and requiring `.glsl` files to define `void main()`), and `build_ipa_from_nsp.py` honors `gl_capture.tsv` and falls back to Mac `DM_GL_CAPTURE` when offline translation yields only `main`'s embedded shaders or fails with no translated RomFS shaders.
+- **Check:** `test_profile_guess.py`, `test_gl_shaders.py`, and `test_nsp_incremental.py`.
+- **Found on:** Darkest Dungeon Complete (`01008F1008DA6000`, [issue #3021](https://github.com/seedds/nxnative/issues/3021)).
 
 ### GL capture compiles missing shaders
 
