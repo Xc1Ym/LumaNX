@@ -282,12 +282,21 @@ struct GameDetail: View {
                     toolDivider
                 }
                 if game.ready==true {
-                    VStack(alignment:.leading,spacing:4) {
-                        Toggle(L("压缩游戏资源（Zstandard）"),isOn:Binding(get:{game.assetCompressionRequested ?? false},set:{store.confirmAssetCompression(game,enabled:$0)}))
-                            .disabled(store.executionBusy || !store.queue.isEmpty || game.playingFromNAS == true)
-                        Text(L(game.assetCompressionCapable==true ? "可选。游戏运行时按需解压资源，存档单独保存。" : "默认关闭。旧运行版本需要重新准备后才能使用压缩资源。"))
-                            .font(.caption).foregroundStyle(.secondary)
+                    HStack(spacing:0) {
+                        GameToolLabel(title:"压缩游戏资源（Zstandard）",symbol:"archivebox")
+                            .accessibilityHidden(true)
+                        Toggle(L("压缩游戏资源（Zstandard）"),isOn:Binding(
+                            get:{game.assetCompressionRequested ?? false},
+                            set:{store.confirmAssetCompression(game,enabled:$0)}
+                        ))
+                        .toggleStyle(.checkbox)
+                        .labelsHidden()
+                        .padding(.trailing,12)
+                        .disabled(store.executionBusy || !store.queue.isEmpty || game.playingFromNAS == true)
                     }
+                    .contentShape(Rectangle())
+                    .help(L("可选。游戏运行时按需解压资源，存档单独保存。"))
+                    toolDivider
                     DisclosureGroup {
                         VStack(alignment:.leading,spacing:6) {
                             Toggle(L("性能叠加层（帧率、GPU 时间、内存）"),isOn:Binding(get:{store.preferences.performanceHUD ?? false},set:{store.preferences.performanceHUD=$0;store.savePreferences()}))
