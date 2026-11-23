@@ -55,9 +55,10 @@ struct Game: Codable, Identifiable {
     }
     var runtimeVersionLabel: String? {
         guard let code = runtimeVersion, !code.isEmpty else { return nil }
-        // The bundled Mario Tennis Fever profile documents this release mapping.
+        // Verified mappings from the bundled Tennis profile and Bananza NUP metadata.
         // Filename labels cannot identify a runtime when two files share an internal code.
         if id == "0400D4201C6EA000", code == "v327680" { return "1.1.1 · " + code }
+        if id == "040074A01BF12000", code == "v458752" { return "3.2.0 · " + code }
         for package in packages where package.type != "dlc" && code == "v\(package.version)" {
             if let retail = package.retailVersion, !retail.fromFilename { return retail.value + " · " + code }
         }
