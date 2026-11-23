@@ -1,6 +1,7 @@
 """Verified compressed compiled-runtime archives; saves remain in the local library."""
 from __future__ import annotations
 import hashlib
+import json
 import os
 from pathlib import Path
 import shutil
@@ -111,16 +112,27 @@ def archive(c):
             identifier=uuid.uuid4().hex;runtime=read(lean/'manifest.json',{})
             manifest=dict(schema=1,id=identifier,gameId=game_id,created=time.time(),reason='runtimeArchive',
                           kind='lumanx-runtime',storage='zip',name=game.get('name',game_id),version=runtime.get('version',''),**expected)
+            version_fields = {key: runtime[key] for key in ('internalVersion', 'retailVersion', 'retailVersionSource') if key in runtime}
+            manifest.update(version_fields)
+            manifest_bytes = json.dumps(manifest, ensure_ascii=False, indent=2).encode('utf-8')
+            manifest_hash = hashlib.sha256(manifest_bytes).hexdigest()
             final=root/identifier
             with tempfile.TemporaryDirectory(prefix='.archive-',dir=root) as temporary:
                 stage=Path(temporary)/'snapshot';stage.mkdir(mode=0o700)
                 c.begin('Compress compiled game to NAS',3,5);_zip(c,lean,stage/'runtime.zip',expected)
                 c.begin('Verify compressed NAS archive',4,5);_unzip(c,stage/'runtime.zip',expected)
                 if inventory(c,source)!=original:raise Failure('The local runtime changed during archive. Local files were kept.')
-                atomic(stage/'manifest.json',manifest);c.check();os.rename(stage,final)
+                with (stage / 'manifest.json').open('xb') as stream:
+                    stream.write(manifest_bytes)
+                    stream.flush()
+                    os.fsync(stream.fileno())
+                if (stage / 'manifest.json').read_bytes() != manifest_bytes:
+                    raise Failure('The NAS archive manifest changed. No local files or saves were changed.')
+                c.check()
+                os.rename(stage, final)
             entry=dict(path=str(final),id=identifier,version=manifest['version'],created=manifest['created'],
                        size=(final/'runtime.zip').stat().st_size,runtimeSize=sum(v['size'] for v in expected['files'].values()),
-                       manifestHash=digest(final/'manifest.json'),compressed=True)
+                       manifestHash=manifest_hash,compressed=True,**version_fields)
             _record(c,game_id,entry);c.check()
             if current.resolve()!=source:raise Failure('The active runtime changed. Local files were kept; the NAS archive is verified.')
             c.begin('Release local compiled game space',5,5)
@@ -140,9 +152,15 @@ def restore(c):
         source=Path(raw)
         if not source.is_dir():raise Failure('The NAS archive is unavailable. Connect the share and retry; local saves were not changed.')
         if source.is_symlink():raise Failure('The archive must not be a symbolic link.')
-        if not entry.get('manifestHash') or digest(source/'manifest.json')!=entry['manifestHash']:
+        manifest_path = source / 'manifest.json'
+        try:
+            if manifest_path.is_symlink(): raise OSError('manifest is a symbolic link')
+            manifest_bytes = manifest_path.read_bytes()
+        except OSError as error:
+            raise Failure('The NAS archive manifest changed. No local files or saves were changed.') from error
+        if hashlib.sha256(manifest_bytes).hexdigest() != entry.get('manifestHash'):
             raise Failure('The NAS archive manifest changed. No local files or saves were changed.')
-        manifest=backup_manifest(source,game_id)
+        manifest = backup_manifest(source, game_id, authenticated_bytes=manifest_bytes)
         if manifest.get('kind')!='lumanx-runtime':raise Failure('This is not a LumaNX compiled-game archive.')
         expected={k:manifest[k] for k in ('files','directories')}
         releases=local/'releases'

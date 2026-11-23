@@ -6,6 +6,7 @@ import contextlib
 from collections import Counter
 import hashlib
 import io
+import json
 from pathlib import Path
 import shutil
 import sys
@@ -122,6 +123,22 @@ class NupGameTests(unittest.TestCase):
         self.imported();out2=self.root/'fallback'
         self.quiet(nup.extract,self.c,self.c.library/self.game()['packages'][0]['path'],VERSION,out2)
         self.assertIsNotNone(rfs.Image(out2/'RomFS.img').find('removed'))
+
+    def test_captured_nro_is_revalidated_on_each_resume(self):
+        from types import SimpleNamespace
+        patched = self.root / 'patched_v1'
+        folder = self.root / 'nro_v1'
+        folder.mkdir()
+        nro = folder / 'nro0.nro'
+        content = b'captured image'
+        nro.write_bytes(content)
+        sha = hashlib.sha256(content).hexdigest()
+        (folder / 'nro.tsv').write_text(f'nro0\t{sha}\t{len(content)}\tgame.nrr\tcapture\n')
+        upstream = SimpleNamespace(captured_nros=lambda _: folder)
+        self.assertEqual(build.verified_captured_nros(self.c, upstream, patched), folder)
+        nro.write_bytes(b'x' * len(content))
+        with self.assertRaisesRegex(Failure, 'Captured NRO data failed validation'):
+            build.verified_captured_nros(self.c, upstream, patched)
 
     def test_partial_import_copies_only_selected_extents_and_merges_later_update(self):
         source = self.source.resolve()
@@ -295,6 +312,11 @@ class NupGameTests(unittest.TestCase):
              patch.object(self.c,'nx',side_effect=AssertionError('must not decrypt')),patch.object(self.c,'run',side_effect=run),\
              patch('build.compile_host',side_effect=host),patch('toolchain.require_launch_environment'):
             result=build.build(self.c);runtime=Path(result['path']);build.validate_runtime(runtime,gp)
+            manifest = json.loads((runtime / 'manifest.json').read_text())
+            self.assertEqual(manifest['internalVersion'], gp.get('package'))
+            chosen = next(p for p in game['packages'] if f"v{p['version']}" == gp.get('package'))
+            if chosen['display'] == '1.2':
+                self.assertEqual(manifest['retailVersion'], '1.2')
             self.assertTrue((runtime/'romfs.img').is_file());self.assertEqual((runtime/'aoc/1.img').is_file(), expect_dlc)
             build.launch(self.c);self.assertTrue(runs[-1][1]['DM_ROMFS'].endswith('romfs.img'))
             build.build(self.c);self.assertEqual(len(rewrites),1)

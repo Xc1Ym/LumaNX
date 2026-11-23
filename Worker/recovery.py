@@ -1,6 +1,7 @@
 """Managed save snapshots and validated runtime switching, serialized with gameplay."""
 from __future__ import annotations
 import ctypes
+import json
 import math
 import os
 from pathlib import Path, PurePosixPath
@@ -84,10 +85,10 @@ def backup(c):
         return {'backup':snapshot(c,c.game()['id'])}
 
 
-def backup_manifest(path, game_id):
+def backup_manifest(path, game_id, *, authenticated_bytes=None):
     try:
         if path.is_symlink() or (path/'manifest.json').is_symlink(): raise ValueError()
-        m=read(path/'manifest.json',{})
+        m=read(path/'manifest.json',{}) if authenticated_bytes is None else json.loads(authenticated_bytes)
         if not isinstance(m,dict): raise ValueError()
         if m.get('schema')!=1 or m.get('id')!=path.name or m.get('gameId')!=game_id: raise ValueError()
         if type(m.get('created')) not in (int,float) or not math.isfinite(m['created']) or not isinstance(m.get('reason'),str): raise ValueError()

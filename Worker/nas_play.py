@@ -83,6 +83,7 @@ def publish(c):
         entry = dict(id=identifier, path=str(remote), manifestHash=expected['files']['manifest.json']['sha256'],
                      version=manifest['version'], assetCompression=bool(manifest.get('assetCompression')),
                      inputConfig=manifest.get('inputConfig', True))
+        entry.update({key: manifest[key] for key in ('internalVersion', 'retailVersion', 'retailVersionSource') if key in manifest})
         catalog = c.catalog()
         next(item for item in catalog['games'] if item['id'] == game['id'])['nasRuntime'] = entry
         c.save_catalog(catalog)

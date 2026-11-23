@@ -36,6 +36,8 @@ struct Game: Codable, Identifiable {
     var assetCompressionCapable: Bool?
     var assetCompressionRequested: Bool?
     var runtimeVersion: String?
+    var runtimeInternalVersion: String?
+    var runtimeRetailVersion: String?
     var buildMissing: [String]?
     var archived: Bool?
     var archivePath: String?
@@ -54,7 +56,10 @@ struct Game: Codable, Identifiable {
         return nil
     }
     var runtimeVersionLabel: String? {
-        guard let code = runtimeVersion, !code.isEmpty else { return nil }
+        guard let code = runtimeInternalVersion ?? runtimeVersion, !code.isEmpty else { return nil }
+        if let retail = runtimeRetailVersion, !retail.isEmpty, retail != code {
+            return retail + " · " + code
+        }
         // Verified mappings from the bundled Tennis profile and Bananza NUP metadata.
         // Filename labels cannot identify a runtime when two files share an internal code.
         if id == "0400D4201C6EA000", code == "v327680" { return "1.1.1 · " + code }

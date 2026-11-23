@@ -293,6 +293,9 @@ def catalog(c):
         g['restoreSize']=archive.get('runtimeSize')
         if g['ready'] or g['archived']: g['missing']=[]
         g['runtimeVersion']=manifest.get('version','') or nas_runtime.get('version','') or archive.get('version','')
+        runtime_metadata = manifest or nas_runtime or archive
+        g['runtimeInternalVersion'] = runtime_metadata.get('internalVersion')
+        g['runtimeRetailVersion'] = runtime_metadata.get('retailVersion')
         g['inputConfig']=(manifest or nas_runtime).get('inputConfig',True) if manifest or nas_runtime else bool(selected_engine and selected_engine['inputConfig'])
         g['needsPreparation']=bool(manifest) and (selected_engine is not None and manifest.get('engine') != selected_engine['fingerprint'] or bool(g['packages']) and manifest.get('sourceHashes') != sorted(x['sha256'] for x in g['packages']))
         if manifest and manifest.get('pipeline')!=pipeline: g['needsPreparation']=True

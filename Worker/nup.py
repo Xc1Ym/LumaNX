@@ -210,6 +210,13 @@ def register(c,path,stage,sha,size):
         expanded=sum(f[1] for f in n.files)
         selected=max((k for k in n.packages if k.kind in (parser.BASE,parser.UPDATE) and k.exefs!=parser.NO_DIR),key=lambda k:k.version)
         name,display,icon=control_data(c,parser,n,selected)
+        retail_origin = 'control' if display else 'container label'
+        if not display and hasattr(parser, 'display_label'):
+            candidate = parser.display_label(selected)
+            if isinstance(candidate, str):
+                import re
+                if re.fullmatch(r'[vV]?\d+\.\d+(?:\.\d+){0,2}', candidate.strip()):
+                    display = candidate.strip()
         name=name or profile['name']
     with c.lock():
         cat=c.catalog();game=next((g for g in cat['games'] if g['id']==tid),None)
@@ -222,7 +229,8 @@ def register(c,path,stage,sha,size):
         for p in packages:
             p.update(sourceKind='nup',metadataSchema=2,path=str(dest.relative_to(c.library)),size=size,sha256=sha,name=name,sourceFilename=Path(path).name,sourceExpandedSize=expanded)
         newest=max((p for p in packages if p['type']!='dlc'),key=lambda p:p['version'])
-        if display: newest['display']=display
+        if display:
+            newest.update(display=display, retailVersionSource=retail_origin)
         if game:
             replaced = {package_key(package) for package in packages}
             retained = [package for package in game['packages']

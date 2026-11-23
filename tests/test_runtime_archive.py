@@ -34,7 +34,7 @@ class RuntimeArchiveTests(unittest.TestCase):
         (shaders/'key_b.metallib').write_bytes(b'synthetic shader')
         (shaders/'key_b.metal').write_bytes(b'generated source'*10000)
         (runtime/'shaders/cas-abc.db').write_bytes(b'build cache'*10000)
-        atomic(runtime/'manifest.json',dict(schema=1,gameId=GAME,chain='abc',graphics='nvn',version='v458752',preparationMode='registered'))
+        atomic(runtime/'manifest.json',dict(schema=1,gameId=GAME,chain='abc',graphics='nvn',version='v458752',internalVersion='v458752',retailVersion='3.2.0',preparationMode='registered'))
         saves=self.library/'saves'/GAME;saves.mkdir(parents=True);(saves/'save.dat').write_bytes(b'keep my save')
         self.runtime=runtime
 
@@ -90,6 +90,7 @@ class RuntimeArchiveTests(unittest.TestCase):
         self.assertEqual(self.saved(),b'keep my save')
         self.assertTrue((archived/'runtime.zip').is_file())
         self.assertTrue(entry['compressed']);self.assertLess(entry['size'],entry['runtimeSize'])
+        self.assertEqual((entry['retailVersion'], entry['internalVersion']), ('3.2.0', 'v458752'))
         self.assertEqual(self.c.catalog()['games'][0]['runtimeArchive']['path'],str(archived))
         restored=self.quiet(runtime_archive.restore,self.c)
         self.assertTrue((self.local/'current/dmhost').is_file());self.assertTrue(restored['archiveKept'])
@@ -125,6 +126,24 @@ class RuntimeArchiveTests(unittest.TestCase):
         manifest.write_text(manifest.read_text()+' ')
         with self.assertRaisesRegex(Failure,'manifest changed'):self.quiet(runtime_archive.restore,self.c)
         self.assertEqual(self.saved(),b'keep my save')
+
+    def test_restore_uses_only_the_authenticated_manifest_read(self):
+        entry = self.quiet(runtime_archive.archive, self.c)['archive']
+        manifest_path = Path(entry['path']) / 'manifest.json'
+        original_read = Path.read_bytes
+        reads = []
+
+        def replace_after_read(path):
+            data = original_read(path)
+            if path == manifest_path:
+                reads.append(path)
+                path.write_bytes(b'{}')
+            return data
+
+        with patch.object(Path, 'read_bytes', replace_after_read):
+            self.quiet(runtime_archive.restore, self.c)
+        self.assertEqual(reads, [manifest_path])
+        self.assertTrue((self.local / 'current').exists())
 
     def test_requirements_distinguish_playing_from_rebuilding(self):
         profile=dict(id=GAME,name='Synthetic game',package='v458752',builds={'v458752':{'display':'2.0'}},compatibility='verified')
