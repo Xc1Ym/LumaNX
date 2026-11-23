@@ -282,34 +282,39 @@ struct GameDetail: View {
                     toolDivider
                 }
                 if game.ready==true {
-                    HStack(spacing:0) {
-                        GameToolLabel(title:"压缩游戏资源（Zstandard）",symbol:"archivebox")
-                            .accessibilityHidden(true)
-                        Toggle(L("压缩游戏资源（Zstandard）"),isOn:Binding(
-                            get:{game.assetCompressionRequested ?? false},
-                            set:{store.confirmAssetCompression(game,enabled:$0)}
-                        ))
-                        .toggleStyle(.checkbox)
-                        .labelsHidden()
-                        .padding(.trailing,12)
-                        .disabled(store.executionBusy || !store.queue.isEmpty || game.playingFromNAS == true)
-                    }
-                    .contentShape(Rectangle())
+                    GameToolCheckbox(title:"压缩游戏资源（Zstandard）",symbol:"archivebox",isOn:Binding(
+                        get:{game.assetCompressionRequested ?? false},
+                        set:{store.confirmAssetCompression(game,enabled:$0)}
+                    ),locked:store.executionBusy || !store.queue.isEmpty || game.playingFromNAS == true)
                     .help(L("可选。游戏运行时按需解压资源，存档单独保存。"))
                     toolDivider
                     DisclosureGroup {
-                        VStack(alignment:.leading,spacing:6) {
-                            Toggle(L("性能叠加层（帧率、GPU 时间、内存）"),isOn:Binding(get:{store.preferences.performanceHUD ?? false},set:{store.preferences.performanceHUD=$0;store.savePreferences()}))
-                                .disabled(store.executionBusy || !store.queue.isEmpty)
-                            Toggle(L("记录性能测试"),isOn:Binding(get:{store.preferences.recordPerformance ?? false},set:{store.preferences.recordPerformance=$0;store.savePreferences()}))
-                                .disabled(store.executionBusy || !store.queue.isEmpty)
-                            Text(L("下次启动时生效。记录会保存逐帧计时和报告；比较时请保持相同设置。"))
-                                .font(.caption).foregroundStyle(.secondary)
-                            TextField(L("测试标签（例如：本地压缩）"),text:Binding(get:{store.preferences.benchmarkLabel ?? ""},set:{store.preferences.benchmarkLabel=String($0.prefix(80));store.savePreferences()}))
-                                .textFieldStyle(.roundedBorder).disabled(store.executionBusy || !store.queue.isEmpty)
-                            Button(L("计时面板…")){store.showPerformancePanel(game)}
-                            Button(L("性能报告…")){store.openPerformanceReports(game)}
-                        }.padding(6).background(.primary.opacity(0.025))
+                        let settingsLocked = store.executionBusy || !store.queue.isEmpty
+                        VStack(alignment:.leading,spacing:0) {
+                            GameToolCheckbox(title:"性能叠加层（帧率、GPU 时间、内存）",symbol:"gauge",isOn:Binding(
+                                get:{store.preferences.performanceHUD ?? false},
+                                set:{store.preferences.performanceHUD=$0;store.savePreferences()}
+                            ),locked:settingsLocked)
+                            .help(L("下次启动时生效。"))
+                            GameToolCheckbox(title:"记录性能测试",symbol:"record.circle",isOn:Binding(
+                                get:{store.preferences.recordPerformance ?? false},
+                                set:{store.preferences.recordPerformance=$0;store.savePreferences()}
+                            ),locked:settingsLocked)
+                            .help(L("下次启动时生效。记录会保存逐帧计时和报告；比较时请保持相同设置。"))
+                            TextField(L("测试标签（例如：本地压缩）"),text:Binding(
+                                get:{store.preferences.benchmarkLabel ?? ""},
+                                set:{store.preferences.benchmarkLabel=String($0.prefix(80));store.savePreferences()}
+                            ))
+                            .textFieldStyle(.roundedBorder)
+                            .padding(.leading,36).padding(.trailing,12).padding(.vertical,6)
+                            .disabled(settingsLocked)
+                            Button {store.showPerformancePanel(game)} label:{
+                                GameToolLabel(title:"计时面板…",symbol:"timer")
+                            }
+                            Button {store.openPerformanceReports(game)} label:{
+                                GameToolLabel(title:"性能报告…",symbol:"chart.bar.xaxis")
+                            }
+                        }.padding(.leading,6).background(.primary.opacity(0.025))
                     } label: {
                         GameToolLabel(title:"性能诊断（所有游戏）",symbol:"gauge.with.dots.needle.67percent")
                     }.disclosureGroupStyle(GameToolDisclosureStyle())
@@ -368,6 +373,24 @@ private struct GameToolCardStyle:ViewModifier {
         content.clipShape(RoundedRectangle(cornerRadius:14)).glassSurface(14)
     }
 }
+private struct GameToolCheckbox: View {
+    let title: String
+    let symbol: String
+    @Binding var isOn: Bool
+    let locked: Bool
+
+    var body: some View {
+        HStack(spacing:0) {
+            GameToolLabel(title:title,symbol:symbol).accessibilityHidden(true)
+            Toggle(L(title),isOn:$isOn)
+                .toggleStyle(.checkbox)
+                .labelsHidden()
+                .padding(.trailing,12)
+                .disabled(locked)
+        }.contentShape(Rectangle())
+    }
+}
+
 private struct GameToolLabel:View {
     let title:String
     let symbol:String

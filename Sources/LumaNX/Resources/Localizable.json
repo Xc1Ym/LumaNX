@@ -3938,5 +3938,9 @@
   {
     "source": "校验并启用本地副本，保留 NAS 副本。",
     "en": "Verify and activate a local copy. The NAS copy is kept."
+  },
+  {
+    "source": "下次启动时生效。",
+    "en": "Applies on next launch."
   }
 ]
