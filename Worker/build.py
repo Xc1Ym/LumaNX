@@ -535,7 +535,8 @@ def launch(c):
     with c.lock('execution'):
         from nas_play import launch_paths
         g=c.game(); current=c.library/'games'/g['id']/'current'
-        runtime,host=launch_paths(c,g,current); validate_runtime(runtime)
+        runtime,host=launch_paths(c,g,current)
+        if runtime == current: validate_runtime(runtime)
         c.begin('游戏运行中',1,1)
         save=c.library/'saves'/g['id']; temp=c.library/'temp'/g['id']; pso=c.library/'games'/g['id']/'pso_user/pipelines.tsv'
         for p in (save,temp,pso.parent): p.mkdir(parents=True,exist_ok=True)

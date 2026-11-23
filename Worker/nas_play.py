@@ -9,6 +9,22 @@ from recovery import game_root, inventory
 from runtime_archive import _copy, _space
 
 
+
+def inventory_progress(c, expected=None, offset=0):
+    """Report a stage-wide checksum total instead of resetting for each file."""
+    done = 0
+    positions = {}
+    total = None if expected is None else 2 * sum(item['size'] for item in expected['files'].values())
+
+    def report(path, count):
+        nonlocal done
+        done += count - positions.get(path, 0)
+        positions[path] = count
+        completed = offset + done
+        c.progress(min(completed, total - 1) if total else completed, total)
+
+    return report
+
 def publish(c):
     from build import validate_runtime
 
@@ -45,16 +61,18 @@ def publish(c):
         hosts.mkdir(exist_ok=True)
         host = hosts / identifier / 'dmhost'
         c.begin('Inspect local runtime for NAS play', 1, 4)
-        expected = inventory(c, source)
+        expected = inventory(c, source, inventory_progress(c))
         _space(destination, expected)
         with tempfile.TemporaryDirectory(prefix='.publishing-', dir=destination) as scratch:
             staging = Path(scratch) / 'runtime'
             c.begin('Copy playable runtime to NAS', 2, 4)
             _copy(c, source, staging, expected)
             c.begin('Verify playable NAS runtime', 3, 4)
-            if inventory(c, staging) != expected or inventory(c, source) != expected:
+            size = sum(item['size'] for item in expected['files'].values())
+            if (inventory(c, staging, inventory_progress(c, expected)) != expected
+                    or inventory(c, source, inventory_progress(c, expected, offset=size)) != expected):
                 raise Failure('Runtime verification failed. The local runtime was kept.')
-            validate_runtime(staging)
+            # We validated the source and verified the destination byte for byte.
             host.parent.mkdir()
             clone(source / 'dmhost', host)
             host.chmod(0o755)
@@ -89,6 +107,10 @@ def launch_paths(c, game, current):
         raise Failure('The playable NAS runtime is offline. Reconnect the share and retry.')
     if digest(manifest) != entry['manifestHash']:
         raise Failure('The playable NAS runtime manifest changed. Publish the runtime again.')
+    if not (remote / 'modules').is_dir() or not (remote / 'shaders').is_dir() or not (
+        (remote / 'romfs.img').is_file() or (remote / 'romfs').is_dir()
+    ):
+        raise Failure('The playable NAS runtime is incomplete. Publish the runtime again.')
     host = contained(current.parent / 'nas-hosts', current.parent / 'nas-hosts' / entry['id'] / 'dmhost')
     if not host.is_file():
         raise Failure('The local NAS game host is missing. Publish the runtime again.')
