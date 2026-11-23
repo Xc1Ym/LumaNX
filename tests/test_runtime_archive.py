@@ -86,6 +86,24 @@ class RuntimeArchiveTests(unittest.TestCase):
         with self.assertRaisesRegex(Failure,'manifest changed'):self.quiet(runtime_archive.restore,self.c)
         self.assertEqual(self.saved(),b'keep my save')
 
+    def test_restore_uses_only_the_authenticated_manifest_read(self):
+        entry = self.quiet(runtime_archive.archive, self.c)['archive']
+        manifest_path = Path(entry['path']) / 'manifest.json'
+        original_read = Path.read_bytes
+        reads = []
+
+        def replace_after_read(path):
+            data = original_read(path)
+            if path == manifest_path:
+                reads.append(path)
+                path.write_bytes(b'{}')
+            return data
+
+        with patch.object(Path, 'read_bytes', replace_after_read):
+            self.quiet(runtime_archive.restore, self.c)
+        self.assertEqual(reads, [manifest_path])
+        self.assertTrue((self.local / 'current').exists())
+
     def test_requirements_distinguish_playing_from_rebuilding(self):
         profile=dict(id=GAME,name='Synthetic game',package='v458752',builds={'v458752':{'display':'2.0'}},compatibility='verified')
         self.c.engine=self.root/'engine'
