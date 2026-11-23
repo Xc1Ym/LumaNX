@@ -43,15 +43,25 @@ struct Game: Codable, Identifiable {
     var archiveSize: Int64?
     var restoreSize: Int64?
     var sourceKind: String?
-    var importedRetailVersion: (value: String, fromFilename: Bool, isUpdate: Bool)? {
+    var importedRetailVersion: (value: String, internalVersion: String, fromFilename: Bool, isUpdate: Bool)? {
         let candidates = packages.filter { $0.type == "update" || $0.type == "base" }
             .sorted { $0.version > $1.version }
         for package in candidates {
             if let version = package.retailVersion {
-                return (version.value, version.fromFilename, package.type == "update")
+                return (version.value, "v\(package.version)", version.fromFilename, package.type == "update")
             }
         }
         return nil
+    }
+    var runtimeVersionLabel: String? {
+        guard let code = runtimeVersion, !code.isEmpty else { return nil }
+        // The bundled Mario Tennis Fever profile documents this release mapping.
+        // Filename labels cannot identify a runtime when two files share an internal code.
+        if id == "0400D4201C6EA000", code == "v327680" { return "1.1.1 · " + code }
+        for package in packages where package.type != "dlc" && code == "v\(package.version)" {
+            if let retail = package.retailVersion, !retail.fromFilename { return retail.value + " · " + code }
+        }
+        return code
     }
     var canExportIPA: Bool { sourceKind != "dump" && sourceKind != "nup" }
     var compatibilityName: String { ["startup":L("仅验证启动"),"verified":L("Mac 已验证"),"experimental":L("实验性"),"unsupported":L("暂不支持")][compatibility ?? "unsupported"] ?? L("实验性") }

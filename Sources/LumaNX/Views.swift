@@ -102,12 +102,12 @@ struct ContentView: View {
                                 GameCover(game:game).frame(width:76,height:76).clipShape(RoundedRectangle(cornerRadius:12)).accessibilityHidden(true)
                                 VStack(alignment:.leading,spacing:8) {
                                     Text(game.name).font(.headline).lineLimit(2)
-                                    let runtime = game.runtimeVersion.flatMap { $0.isEmpty ? nil : $0 }
+                                    let runtime = game.runtimeVersionLabel
                                     Text(runtime.map { String(format:L("运行版本 %@"),$0) } ?? (game.display.isEmpty ? L("版本待识别") : game.display))
                                         .font(.caption).foregroundStyle(.secondary)
                                     if let retail = game.importedRetailVersion {
                                         let format = retail.isUpdate ? L("已导入更新 %@") : L("已导入本体 %@")
-                                        let label = String(format:format,retail.value)
+                                        let label = String(format:format,retail.value) + " · " + retail.internalVersion
                                         Text(retail.fromFilename ? label + " · " + L("来自文件名") : label)
                                             .font(.caption).foregroundStyle(.secondary)
                                     }
@@ -243,7 +243,7 @@ struct GameDetail: View {
         } message:{Text(L("仅处理托管副本；原始文件、存档和上次成功的运行版本保留。其他游戏仍在引用的共享文件会保留。"))}
     }
     private var displayedVersion:String {
-        if (game.ready==true || game.archived==true),let version=game.runtimeVersion,!version.isEmpty {return version}
+        if (game.ready==true || game.archived==true),let version=game.runtimeVersionLabel {return version}
         return game.display.isEmpty ? L("版本待识别") : game.display
     }
     private var gameTools:some View {
