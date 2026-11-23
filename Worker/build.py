@@ -58,7 +58,9 @@ class Stages:
             out[str(p.relative_to(self.root))]=[size,digest(p,lambda n,t:self.c.progress(done+n,total))];done+=size
         if not out: raise Failure('阶段没有生成完整产物，未记录成功缓存。')
         return out
-    def run(self,name,paths,fn,milestone=None):
+    def run(self,name,paths,fn,milestone=None,*,optional_paths=()):
+        def outputs():
+            return [*paths, *(p for p in optional_paths if p.exists() or p.is_symlink())]
         if milestone: ms.enter(self.c,milestone,name)
         else: self.c.begin(name)
         old=self.saved.get(name)
@@ -66,7 +68,7 @@ class Stages:
         prior=self.inputs.get(name,{})
         if self.graph and wanted!=(prior.get('key') or self.legacy.get(name)): old=None
         valid=bool(old);done=0;total=sum(v[0] for v in old.values()) if old else 0
-        layout=self.layout(paths,name) if valid else None
+        layout=self.layout(outputs(),name) if valid else None
         if valid and (layout is None or {str(p.relative_to(self.root)) for p in layout[0]}!=set(old)
                 or prior.get('directories',layout[1])!=layout[1]): valid=False
         if valid:
@@ -84,11 +86,12 @@ class Stages:
         # failed or cancelled rebuild can never promote partially written files.
         self.saved.pop(name,None);self.inputs.pop(name,None)
         atomic(self.file,self.saved);atomic(self.inputfile,self.inputs)
-        for p in paths:
-            if Path(p).is_dir(): shutil.rmtree(p)
+        for p in outputs():
+            if Path(p).is_symlink(): Path(p).unlink()
+            elif Path(p).is_dir(): shutil.rmtree(p)
             elif Path(p).exists(): Path(p).unlink()
-        fn(); self.c.check(); self.saved[name]=self.snapshot(paths,name)
-        if self.graph: self.inputs[name]=dict(key=wanted,directories=self.layout(paths,name)[1])
+        fn(); self.c.check(); self.saved[name]=self.snapshot(outputs(),name)
+        if self.graph: self.inputs[name]=dict(key=wanted,directories=self.layout(outputs(),name)[1])
         self.warnings[name]=[d for d in self.c.job.get('diagnostics',[]) if d.get('stage')==name and d['severity']=='warning']
         atomic(self.warningfile,self.warnings);atomic(self.file,self.saved);atomic(self.inputfile,self.inputs)
         self.rebuilt.append(name)
@@ -228,6 +231,41 @@ def compile_host(c,up,repo,env,root,gp):
     c.run(['codesign','--verify','--strict',host],root/'logs/sign.log',env)
     return host
 
+def verified_captured_nros(c, upstream, patched):
+    locate = getattr(upstream, 'captured_nros', None)
+    folder = locate(patched) if locate else None
+    if folder is None:
+        return None
+    folder = Path(folder)
+    expected = patched.with_name('nro_' + patched.name.removeprefix('patched_'))
+    manifest = folder / 'nro.tsv'
+    try:
+        if folder != expected or folder.is_symlink() or manifest.is_symlink():
+            raise ValueError()
+        captures = set()
+        recorded = set()
+        for row in manifest.read_text().splitlines():
+            if not row or row.startswith(('#', 'refused')):
+                continue
+            name, sha, size, _, origin = row.split('\t', 4)
+            if not re.fullmatch(r'nro[0-9]+', name) or not re.fullmatch(r'[a-f0-9]{64}', sha) or name in recorded:
+                raise ValueError()
+            image = folder / f'{name}.nro'
+            if image.is_symlink() or not image.is_file() or image.stat().st_size != int(size):
+                raise ValueError()
+            c.check()
+            if digest(image, lambda *_: c.check()) != sha:
+                raise ValueError()
+            recorded.add(name)
+            if origin == 'capture':
+                captures.add(name)
+        if not captures or {p.stem for p in folder.glob('*.nro')} != recorded:
+            raise ValueError()
+    except (OSError, ValueError) as error:
+        raise Failure('Captured NRO data failed validation. Re-create the NRO capture before preparing shaders.') from error
+    return folder
+
+
 def install(c,root,repo,gp,key,host,romfs,modules,shader,aoc=None,font=None):
     dst=c.library/'games'/gp.id; releases=dst/'releases'; releases.mkdir(parents=True,exist_ok=True)
     stage=dst/'install.partial'; shutil.rmtree(stage,ignore_errors=True); stage.mkdir()
@@ -348,10 +386,15 @@ def build(c,target='macos'):
             else: aoc.mkdir(); (aoc/'.empty').write_text('no DLC')
         st.run('处理 DLC',[aoc],dlc,milestone='dlc')
         patched=root/('patched_'+gp.get('package')); selected=dirs[gp.get('package')]
-        st.run('重写原生代码',[patched],lambda:up.rewrite(sys.executable,repo,selected/'ExeFS',patched,env,logs,gp),milestone='rewrite')
+        def rewrite():
+            up.rewrite(sys.executable, repo, selected / 'ExeFS', patched, env, logs, gp)
+            verified_captured_nros(c, up, patched)
+
+        nro_cache = patched.with_name('nro_' + patched.name.removeprefix('patched_'))
+        st.run('重写原生代码', [patched], rewrite, milestone='rewrite',
+               optional_paths=(nro_cache, nro_cache.with_name(nro_cache.name + '.key')))
         # nxnative needs captured runtime NROs to read some RomFS archive indexes.
-        captured_nros = getattr(up, 'captured_nros', None)
-        if captured_nros and (nro_dir := captured_nros(patched)):
+        if nro_dir := verified_captured_nros(c, up, patched):
             env = dict(env, DM_NRO_DIR=str(nro_dir))
         if own:
             gp=up.refine_after_rewrite(gp,selected,patched);derived.seal_profile(st,gp)
