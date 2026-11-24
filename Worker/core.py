@@ -93,7 +93,9 @@ class Context:
             if field in request: self.job[field]=request[field]
         if request['operation'] == 'exportIPA': self.job['outputPath'] = request.get('outputPath')
         if request['operation'] == 'convertFiles': self.job['conversion'] = request.get('conversion')
-        if request['operation'] == 'import': self.job['importPaths'] = request.get('paths')
+        if request['operation'] == 'import':
+            self.job['importPaths'] = request.get('paths')
+            self.job['nupSelections'] = request.get('nupSelections')
         for field in ('ended','message','done','total','elapsed','diagnostics'): self.job.pop(field,None)
         atomic(self.jobpath, self.job)
         self.resource = Path(request.get('resources', Path(__file__).resolve().parents[1])).resolve()

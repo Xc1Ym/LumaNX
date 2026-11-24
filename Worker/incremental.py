@@ -38,7 +38,7 @@ def checkpoints(path):
 
 
 def pipeline_version(target='macos'):
-    names=('incremental.py','build.py','core.py','derived.py','dump.py','nup.py','runtime_payload.py')+(('ipa.py',) if target=='ios' else ())
+    names=('incremental.py','build.py','core.py','derived.py','dump.py','nup.py','runtime_payload.py','compressed_assets.py','asset_storage.py')+(('ipa.py',) if target=='ios' else ())
     return hash_value({name:digest(WORKER/name) for name in names})
 
 
@@ -87,7 +87,7 @@ def worker_recipe(kind):
         coordinator[name]=[ast.dump(n) for n in tree.body if isinstance(n,ast.FunctionDef) and n.name in functions]
     entries={
         'unpack':{'build.py':('container_runner',),'dump.py':('extract',),'nup.py':('extract',)},
-        'dlc':{'build.py':('container_runner',),'dump.py':('extract_dlc',),'nup.py':('extract_dlc',)},
+        'dlc':{'build.py':('container_runner',),'dump.py':('extract_dlc',),'nup.py':('extract_registered_dlc',)},
         'profile':{'derived.py':('prepare_profile',)},
         'rewrite':{},
         'capture':{},

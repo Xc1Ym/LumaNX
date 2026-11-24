@@ -19,6 +19,8 @@ final class WorkerOutput: @unchecked Sendable {
 
 @MainActor final class Store: ObservableObject {
     @Published var preferences = Preferences()
+    @Published var importReview: ImportReview?
+    @Published private(set) var scanningImports = false
     @Published var games: [Game] = []
     @Published var tasks: [TaskRecord] = []
     @Published var conversion = ConversionJob()
@@ -57,6 +59,7 @@ final class WorkerOutput: @unchecked Sendable {
     let privateRoot: URL
     let resources: URL
     var processes: [String:Process] = [:]
+    var performancePanels: [String:NSPanel] = [:]
     var suspensions: [String:TaskSuspension] = [:]
     var workerIdentities: [String:TaskSuspension.Identity] = [:]
     var callbacks: [String:([String:Any])->Void] = [:]
@@ -305,7 +308,7 @@ final class WorkerOutput: @unchecked Sendable {
         addGamesAfterOnboarding = false
         // AppKit can ignore terminate while a sheet is attached. Wait for SwiftUI
         // to finish dismissing it, then use the normal delegate/worker shutdown.
-        guard showOnboarding || editingInput || showingRecovery else {
+        guard showOnboarding || editingInput || showingRecovery || importReview != nil else {
             let sheets = NSApp?.windows.compactMap(\.attachedSheet) ?? []
             guard !sheets.isEmpty else { quit(); return }
             for sheet in sheets {sheet.sheetParent?.endSheet(sheet)}
@@ -316,6 +319,7 @@ final class WorkerOutput: @unchecked Sendable {
         showOnboarding = false
         editingInput = false
         showingRecovery = false
+        importReview = nil
     }
     func applicationSheetDismissed() {
         if let quit = quitAfterSheetDismissal {
@@ -341,26 +345,30 @@ final class WorkerOutput: @unchecked Sendable {
         p.allowedContentTypes = ["nsp","xci","nsz","xcz","nup"].compactMap { UTType(filenameExtension:$0) }
         if p.runModal() == .OK { addGames(p.urls) }
     }
-    func addGames(_ urls: [URL]) {
+    func addGames(_ urls: [URL], previousSelections: [String:[String]] = [:]) {
         guard !urls.isEmpty else { return }
-        let folders = urls.contains { (try? $0.resourceValues(forKeys:[.isDirectoryKey]).isDirectory) == true }
-        let requiresKeys = !folders && urls.contains { $0.pathExtension.lowercased() != "nup" }
-        guard importPrerequisitesReady(requiresKeys:requiresKeys) else { return }
+        guard !scanningImports, importReview == nil,
+              importPrerequisitesReady(requiresKeys:false) else { return }
         let libraryId = preferences.libraryId
-        let prepare = prepareAfterImport
-        if folders {
-            // The worker shares this recursive classifier with actual import.
-            // Keep potentially large directory scans off the main actor.
-            worker("scanImport",extra:["paths":urls.map(\.path)],visible:false) { result in
-                guard libraryId == self.preferences.libraryId,
-                      self.importPrerequisitesReady(requiresKeys:result["requiresKeys"] as? Bool ?? true) else {return}
-                self.importGames(urls,libraryId:libraryId,prepare:prepare)
-            }
-        } else { importGames(urls,libraryId:libraryId,prepare:prepare) }
+        scanningImports = true
+        worker("scanImport",extra:["paths":urls.map(\.path)]) { result in
+            guard libraryId == self.preferences.libraryId,
+                  let entries = Self.decode([ImportPreviewEntry].self,result["entries"]) else { return }
+            self.importReview = ImportReview(libraryId:libraryId, entries:entries, previousSelections:previousSelections)
+        }
     }
-    private func importGames(_ urls:[URL],libraryId:String,prepare:Bool) {
+
+    func confirmImport(_ review: ImportReview, paths: Set<String>, prepare: Bool, nupSelections: [String:[String]] = [:]) {
+        guard importReview?.id == review.id, review.libraryId == preferences.libraryId else { return }
+        let selected = review.entries.filter { paths.contains($0.path) && $0.error == nil }
+        guard !selected.isEmpty else { return }
+        importReview = nil
+        guard importPrerequisitesReady(requiresKeys:selected.contains { $0.requiresKeys }) else { return }
+        importGames(selected.map { URL(fileURLWithPath:$0.path) },libraryId:review.libraryId,prepare:prepare,nupSelections:nupSelections)
+    }
+    private func importGames(_ urls:[URL],libraryId:String,prepare:Bool,nupSelections:[String:[String]] = [:]) {
         selection = "tasks"
-        worker("import",extra:["paths":urls.map(\.path)]) { result in
+        worker("import",extra:["paths":urls.map(\.path),"nupSelections":nupSelections]) { result in
             guard libraryId == self.preferences.libraryId else { return }
             let ids = Set((result["imports"] as? [[String:Any]] ?? []).compactMap { item in item["duplicate"] as? Bool == false ? item["id"] as? String : nil })
             self.refresh {
@@ -392,7 +400,7 @@ final class WorkerOutput: @unchecked Sendable {
             self.hasImportedKeys = keys["ready"] as? Bool == true
             self.keyStatus = keys["message"] as? String ?? "尚未导入 prod.keys"
             if let records = Self.decode([TaskRecord].self,r["jobs"]) {
-                for rec in records where rec.state=="failed" || ["archiveGame","restoreGame","backupSave","restoreSave","activateRelease","setup","clean","remove","diagnostics","prepareEngine","import","build","exportIPA","convertFiles","launch","migrate","keys","installMetal","uninstallMetal"].contains(rec.operation) {
+                for rec in records where rec.state=="failed" || ["archiveGame","restoreGame","publishNAS","restoreNAS","backupSave","restoreSave","activateRelease","setup","clean","remove","diagnostics","prepareEngine","import","build","exportIPA","convertFiles","launch","migrate","keys","installMetal","uninstallMetal"].contains(rec.operation) {
                     if !self.deletedTaskIDs.contains(rec.id),!self.tasks.contains(where: { $0.id == rec.id }) { self.tasks.append(rec) }
                 }
                 self.tasks.sort { ($0.started ?? 0) > ($1.started ?? 0) }
@@ -442,6 +450,7 @@ final class WorkerOutput: @unchecked Sendable {
                     self.workerIdentities[id] = nil
                     self.processes[id] = nil; try? FileManager.default.removeItem(at:file)
                     if operation=="catalog" {self.catalogWorkers=max(0,self.catalogWorkers-1)}
+                    if operation=="scanImport" {self.scanningImports=false}
                     if operation=="converterStatus" {self.checkingConverter=false}
                     self.lastWorkerEvent[id] = nil
                     if let i = self.tasks.firstIndex(where:{$0.id == id}), self.tasks[i].active {
@@ -467,7 +476,7 @@ final class WorkerOutput: @unchecked Sendable {
                     if visible { self.refresh() }
                 }
             }
-            if visible { tasks.insert(.init(id:id,operation:operation,state:"running",gameId:extra["gameId"] as? String,started:Date().timeIntervalSince1970,outputPath:extra["outputPath"] as? String,conversion:Self.decode(ConversionJob.self,extra["conversion"]),importPaths:operation == "import" ? extra["paths"] as? [String] : nil,backupId:extra["backupId"] as? String,releaseId:extra["releaseId"] as? String,libraryId:preferences.libraryId),at:0) }
+            if visible { tasks.insert(.init(id:id,operation:operation,state:"running",gameId:extra["gameId"] as? String,started:Date().timeIntervalSince1970,outputPath:extra["outputPath"] as? String,conversion:Self.decode(ConversionJob.self,extra["conversion"]),importPaths:operation == "import" ? extra["paths"] as? [String] : nil,nupSelections:extra["nupSelections"] as? [String:[String]],backupId:extra["backupId"] as? String,releaseId:extra["releaseId"] as? String,libraryId:preferences.libraryId),at:0) }
             callbacks[id] = completion; processes[id] = process
             try process.run()
             workerIdentities[id] = TaskSuspension.identity(process.processIdentifier)
@@ -475,6 +484,7 @@ final class WorkerOutput: @unchecked Sendable {
         } catch {
             if operation=="converterStatus" {checkingConverter=false}
             if operation=="catalog" {catalogWorkers=max(0,catalogWorkers-1)}
+            if operation=="scanImport" {scanningImports=false}
             self.error = "无法启动本地组件：\(error.localizedDescription)"; processes[id] = nil; callbacks[id] = nil
             let diagnostic=nativeDiagnostic(code:"worker_start_failed",summary:self.error ?? "",detail:error.localizedDescription)
             self.errorDiagnostic=diagnostic
@@ -580,7 +590,7 @@ final class WorkerOutput: @unchecked Sendable {
             }
             return
         }
-        executionTask = worker("launch",extra:["gameId":game.id,"gameLanguage":gameLanguage(for:game.id).rawValue])
+        executionTask = worker("launch",extra:["gameId":game.id,"gameLanguage":gameLanguage(for:game.id).rawValue,"performanceHUD":preferences.performanceHUD ?? false,"recordPerformance":preferences.recordPerformance ?? false,"benchmarkLabel":preferences.benchmarkLabel ?? ""])
     }
     func migrate(_ game: Game) {
         guard !executionBusy else { return }
@@ -614,7 +624,7 @@ final class WorkerOutput: @unchecked Sendable {
     }
     func canPause(_ task: TaskRecord) -> Bool {
         if suspensions[task.id]?.hasPendingCleanup == true { return true }
-        return ["build","exportIPA","convertFiles","archiveGame","restoreGame"].contains(task.operation) &&
+        return ["build","exportIPA","convertFiles","archiveGame","restoreGame","compressAssets","uncompressAssets","publishNAS","restoreNAS"].contains(task.operation) &&
             task.state == "running" && processes[task.id]?.isRunning == true && workerIdentities[task.id] != nil
     }
 
@@ -671,13 +681,16 @@ final class WorkerOutput: @unchecked Sendable {
     func retry(_ task: TaskRecord) {
         if task.operation != "convertFiles",let libraryId=task.libraryId,libraryId != preferences.libraryId {error="请切换回任务所属游戏库后重试。";return}
         if task.operation == "convertFiles",let conversion=task.conversion {startConversion(conversion);return}
-        if task.operation == "import",let paths=task.importPaths {addGames(paths.map {URL(fileURLWithPath:$0)});return}
+        if task.operation == "import",let paths=task.importPaths {addGames(paths.map {URL(fileURLWithPath:$0)},previousSelections:task.nupSelections ?? [:]);return}
         guard let game = games.first(where:{$0.id == task.gameId}) else { return }
-        if task.operation == "archiveGame" {
-            if let root=task.archiveRoot {runtimeTransfer("archiveGame",game:game,extra:["archiveRoot":root])}
+        if ["compressAssets","uncompressAssets"].contains(task.operation) {setAssetCompression(game,enabled:task.operation=="compressAssets");return}
+        if ["archiveGame","publishNAS"].contains(task.operation) {
+            if let root=task.archiveRoot {runtimeTransfer(task.operation,game:game,extra:["archiveRoot":root])}
+            else if task.operation == "publishNAS" {publishPlayableGame(game)}
             else {archiveGame(game)}
         }
         else if task.operation == "restoreGame" {restoreGame(game)}
+        else if task.operation == "restoreNAS" {moveNASGameBackToMac(game)}
         else if task.operation == "backupSave" { performRecovery("backupSave",game:game) }
         else if task.operation == "restoreSave" {
             if let id=task.backupId {performRecovery("restoreSave",game:game,extra:["backupId":id])}
@@ -772,5 +785,6 @@ final class WorkerOutput: @unchecked Sendable {
     }
     func terminate() {
         for id in Set(processes.keys).union(suspensions.keys) { try? stopWorker(id) }
+        performancePanels.values.forEach {$0.close()};performancePanels.removeAll()
     }
 }

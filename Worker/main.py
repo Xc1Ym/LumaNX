@@ -4,6 +4,7 @@ from pathlib import Path
 # The launcher starts Python in isolated mode; only this trusted Worker folder is added.
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from core import Context, Failure, Cancelled
+import asset_storage, nas_play, performance
 import library, build, input_config, toolchain, engine, ipa, diagnostics, conversion, recovery, runtime_archive
 
 def main():
@@ -33,10 +34,12 @@ def main():
     def heartbeat():
         while not heartbeat_stop.wait(1): c.emit('heartbeat')
     threading.Thread(target=heartbeat,daemon=True).start()
-    ops={'prepareEngine':engine.prepare,'installMetal':toolchain.install_metal,'uninstallMetal':toolchain.uninstall_metal,'setup':library.setup,'preflight':library.preflight,'keys':library.keys,'scanImport':library.scan_import,'import':library.import_games,'catalog':library.catalog,'remove':library.remove,'clean':library.clean,'diagnostics':library.diagnostics,'build':build.build,'migrate':build.migrate,'launch':build.launch,'saveInput':input_config.save,'defaultInput':lambda c:input_config.defaults()}
+    ops={'prepareEngine':engine.prepare,'installMetal':toolchain.install_metal,'uninstallMetal':toolchain.uninstall_metal,'setup':library.setup,'preflight':library.preflight,'keys':library.keys,'scanImport':library.scan_import,'import':library.import_games,'catalog':library.catalog,'remove':library.remove,'clean':library.clean,'diagnostics':library.diagnostics,'build':build.build,'migrate':build.migrate,'launch':performance.launch,'saveInput':input_config.save,'defaultInput':lambda c:input_config.defaults()}
     try:
         ops['exportIPA'] = ipa.export
-        ops.update(archiveGame=runtime_archive.archive,restoreGame=runtime_archive.restore)
+        ops['benchmarkMarker'] = performance.marker
+        ops.update(compressAssets=asset_storage.compress,uncompressAssets=asset_storage.uncompress)
+        ops.update(archiveGame=runtime_archive.archive,restoreGame=runtime_archive.restore,publishNAS=nas_play.publish,restoreNAS=nas_play.restore_local)
         ops.update(backupSave=recovery.backup,restoreSave=recovery.restore,listRecovery=recovery.list_recovery,activateRelease=recovery.activate)
         ops.update(convertFiles=conversion.convert,converterStatus=conversion.status,conversionKeys=conversion.import_keys)
         if request['operation'] not in ops: raise Failure('不支持的任务类型。')

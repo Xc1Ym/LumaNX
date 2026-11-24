@@ -6,18 +6,69 @@ struct NSPPackage: Codable, Identifiable {
     var id: String { "\(sha256):\(titleId):\(type):\(version)" }
     var titleId: String; var baseId: String; var version: Int; var type: String; var name: String; var display: String
     var path: String; var size: Int64; var sha256: String; var builds: [String:String]
+    var sourceFilename: String?
+
+    var retailVersion: (value: String, fromFilename: Bool)? {
+        let metadata = display.trimmingCharacters(in:.whitespacesAndNewlines)
+        if let version = Self.versionMatch(in:metadata, pattern:#"^[vV]?(\d+\.\d+(?:\.\d+){0,2})$"#) {
+            return (version, false)
+        }
+        guard let sourceFilename else { return nil }
+        if let version = Self.versionMatch(in:sourceFilename,pattern:#"[\[(][vV]?(\d+\.\d+(?:\.\d+){0,2})[\])]"#) {
+            return (version, true)
+        }
+        return nil
+    }
+
+    private static func versionMatch(in text:String, pattern:String) -> String? {
+        guard let regex = try? NSRegularExpression(pattern:pattern),
+              let match = regex.firstMatch(in:text,range:NSRange(text.startIndex...,in:text)),
+              let range = Range(match.range(at:1),in:text) else { return nil }
+        return String(text[range])
+    }
+
     var kindName: String { ["base":L("本体"),"update":L("更新"),"dlc":"DLC"][type] ?? L("未知内容") }
 }
 struct Game: Codable, Identifiable {
     var id: String; var name: String; var display: String; var packages: [NSPPackage]; var hidden: Bool
     var compatibility: String?; var missing: [String]?; var cover: String?; var ready: Bool?; var needsPreparation: Bool?; var inputConfig:Bool?; var preparationMode:String?; var preparationVersion:String?
+    var assetCompression: Bool?
+    var assetCompressionCapable: Bool?
+    var assetCompressionRequested: Bool?
     var runtimeVersion: String?
+    var runtimeInternalVersion: String?
+    var runtimeRetailVersion: String?
     var buildMissing: [String]?
     var archived: Bool?
     var archivePath: String?
+    var playingFromNAS: Bool?
     var archiveSize: Int64?
     var restoreSize: Int64?
     var sourceKind: String?
+    var importedRetailVersion: (value: String, internalVersion: String, fromFilename: Bool, isUpdate: Bool)? {
+        let candidates = packages.filter { $0.type == "update" || $0.type == "base" }
+            .sorted { $0.version > $1.version }
+        for package in candidates {
+            if let version = package.retailVersion {
+                return (version.value, "v\(package.version)", version.fromFilename, package.type == "update")
+            }
+        }
+        return nil
+    }
+    var runtimeVersionLabel: String? {
+        guard let code = runtimeInternalVersion ?? runtimeVersion, !code.isEmpty else { return nil }
+        if let retail = runtimeRetailVersion, !retail.isEmpty, retail != code {
+            return retail + " · " + code
+        }
+        // Verified mappings from the bundled Tennis profile and Bananza NUP metadata.
+        // Filename labels cannot identify a runtime when two files share an internal code.
+        if id == "0400D4201C6EA000", code == "v327680" { return "1.1.1 · " + code }
+        if id == "040074A01BF12000", code == "v458752" { return "3.2.0 · " + code }
+        for package in packages where package.type != "dlc" && code == "v\(package.version)" {
+            if let retail = package.retailVersion, !retail.fromFilename { return retail.value + " · " + code }
+        }
+        return code
+    }
     var canExportIPA: Bool { sourceKind != "dump" && sourceKind != "nup" }
     var compatibilityName: String { ["startup":L("仅验证启动"),"verified":L("Mac 已验证"),"experimental":L("实验性"),"unsupported":L("暂不支持")][compatibility ?? "unsupported"] ?? L("实验性") }
     var buildable: Bool { compatibility != "unsupported" && (buildMissing ?? missing ?? []).isEmpty }
@@ -31,6 +82,7 @@ struct TaskRecord: Codable, Identifiable {
     var outputFiles: [String]?
     var conversion: ConversionJob?
     var importPaths: [String]?
+    var nupSelections: [String:[String]]?
     var archiveRoot: String?
     var backupId: String?
     var releaseId: String?
@@ -49,7 +101,7 @@ struct TaskRecord: Codable, Identifiable {
     }
     var stateName: String { state == "completed" && hasWarnings ? L("完成（有警告）") : ["queued":L("排队"),"running":L("运行中"),"paused":L("已暂停"),"cancelling":L("取消中"),"cancelled":L("已取消"),"failed":L("失败"),"interrupted":L("中断"),"completed":L("完成")][state] ?? state }
     var active: Bool { ["running","paused","queued","cancelling"].contains(state) }
-    var title: String { ["archiveGame":L("归档到 NAS"),"restoreGame":L("恢复到本地"),"backupSave":L("备份存档"),"restoreSave":L("恢复存档"),"activateRelease":L("切换运行版本"),"listRecovery":L("读取存档备份与运行版本"),"convertFiles":L("文件转换"),"conversionKeys":L("导入转换密钥"),"catalog":L("读取游戏库"),"saveInput":L("保存映射"),"worker":L("本地任务"),"setup":L("创建游戏库"),"clean":L("清理游戏文件"),"remove":L("移出游戏库"),"diagnostics":L("导出诊断"),"exportIPA":L("生成 IPA"),"prepareEngine":L("准备引擎工具"),"import":L("导入游戏"),"build":L("准备游戏"),"migrate":L("迁移构建"),"launch":L("运行游戏"),"keys":L("导入密钥"),"preflight":L("环境检查"),"installMetal":L("安装 Metal 编译组件"),"uninstallMetal":L("卸载 Metal 编译组件")][operation] ?? operation }
+    var title: String { ["restoreNAS":L("移回此 Mac"),"publishNAS":L("移至 NAS 并直接游玩"),"scanImport":L("扫描游戏文件"),"compressAssets":L("压缩游戏资源"),"uncompressAssets":L("使用未压缩资源"),"archiveGame":L("归档到 NAS"),"restoreGame":L("恢复到本地"),"backupSave":L("备份存档"),"restoreSave":L("恢复存档"),"activateRelease":L("切换运行版本"),"listRecovery":L("读取存档备份与运行版本"),"convertFiles":L("文件转换"),"conversionKeys":L("导入转换密钥"),"catalog":L("读取游戏库"),"saveInput":L("保存映射"),"worker":L("本地任务"),"setup":L("创建游戏库"),"clean":L("清理游戏文件"),"remove":L("移出游戏库"),"diagnostics":L("导出诊断"),"exportIPA":L("生成 IPA"),"prepareEngine":L("准备引擎工具"),"import":L("导入游戏"),"build":L("准备游戏"),"migrate":L("迁移构建"),"launch":L("运行游戏"),"keys":L("导入密钥"),"preflight":L("环境检查"),"installMetal":L("安装 Metal 编译组件"),"uninstallMetal":L("卸载 Metal 编译组件")][operation] ?? operation }
 }
 struct ToolCheck: Decodable, Identifiable {
     var id: String { name }; var name: String; var ok: Bool; var message: String
@@ -79,7 +131,7 @@ struct InputConfig: Codable, Equatable {
         return out
     }
 }
-struct Preferences: Codable { var library: String = ""; var libraryId: String = ""; var developerDir = "/Applications/Xcode.app/Contents/Developer"; var onboardingComplete = false; var prepareAfterImport: Bool?; var language: String?; var appearance: String?; var engineDir: String?; var gameLanguage: String?; var gameLanguages: [String:String]?; var conversionOutput:String?; var archiveRoot:String? }
+struct Preferences: Codable { var library: String = ""; var libraryId: String = ""; var developerDir = "/Applications/Xcode.app/Contents/Developer"; var onboardingComplete = false; var prepareAfterImport: Bool?; var language: String?; var appearance: String?; var engineDir: String?; var gameLanguage: String?; var gameLanguages: [String:String]?; var conversionOutput:String?; var archiveRoot:String?; var performanceHUD:Bool?; var recordPerformance:Bool?; var benchmarkLabel:String? }
 
 func keyName(_ b: KeyBinding?) -> String {
     guard let b else { return L("未绑定") }

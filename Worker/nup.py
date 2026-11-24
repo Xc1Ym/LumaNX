@@ -56,6 +56,7 @@ def metadata(c, parser, n):
     profile=profiles(c.engine).get(tid)
     if not profile: raise Failure('已解包游戏需要 nxnative 已适配的游戏配置。')
     packages=[]
+    module_ids = {}
     for version,k in ([(0,base)] if base is not None else [])+sorted(updates.items()):
         # NUP producers use either the application ID (upstream fixtures) or
         # the update title ID. Both must identify this application's family.
@@ -64,10 +65,17 @@ def metadata(c, parser, n):
         if k.exefs==parser.NO_DIR: raise Failure('解包目录缺少有效的 NSO 代码模块。')
         builds={}
         for name,isdir,i in n.children(k.exefs):
-            if isdir or i in n.verified_files: continue
-            data=Prefix(c,0x100);n.copy(i,data)
-            if len(data.data)==0x100 and data.data[:4]==b'NSO0': builds[os.fsdecode(name)]=data.data[0x40:0x50].hex()
-        if any(m not in builds for m in profile.get('modules','main').split()):
+            if isdir or (i in n.verified_files and i not in module_ids): continue
+            if i not in module_ids:
+                data=Prefix(c,0x100);n.copy(i,data)
+                module_ids[i] = data.data[0x40:0x50].hex() if len(data.data)==0x100 and data.data[:4]==b'NSO0' else None
+            if module_ids[i] is not None:
+                builds[os.fsdecode(name)] = module_ids[i]
+        # A profile can list modules from multiple versions. Registered build
+        # rows describe the code each individual package actually ships.
+        registered = profile['builds'].get(f'v{version}', {})
+        required = {'main'} | (set(registered) - {'display'})
+        if not required.issubset(builds):
             raise Failure('解包目录缺少有效的 NSO 代码模块。')
         # Check the profile marker without unpacking a potentially huge RomFS.
         directory=parser.romfs_of(k,base)
@@ -142,14 +150,52 @@ def save_with_cover(c,cat,cover,icon):
             raise
 
 
+def package_key(package):
+    return f"{package['type']}:{package['version']}:{package['titleId']}"
+
+
+def select_packages(c, parser, container, selection):
+    app, base, updates, dlc = parser.scan(container)
+    if container.siblings:
+        raise Failure('此 NUP 包含多个程序，需要完整导入。')
+    candidates = {}
+    if base is not None:
+        candidates[f'base:0:{app:016X}'] = base
+    candidates.update({f'update:{version}:{app + 0x800:016X}': package for version, package in updates.items()})
+    candidates.update({f'dlc:{package.version}:{title:016X}': package for title, package in dlc.items()})
+    if not isinstance(selection, list) or not selection or any(not isinstance(key, str) or key not in candidates for key in selection):
+        raise Failure('所选 NUP 内容已变化，请重新扫描。')
+    chosen = [package for key, package in candidates.items() if key in selection]
+    if not any(package.kind in (parser.BASE, parser.UPDATE) for package in chosen):
+        raise Failure('请选择本体或更新。')
+    if base not in chosen and any(package.kind == parser.UPDATE and package.romfs == parser.NO_DIR for package in chosen):
+        raise Failure('此更新需要同一 NUP 中的本体资源，请同时选择本体。')
+    return chosen
+
+
 def import_game(c,path):
     c.begin('校验 NUP 游戏容器')
     sources=contained(c.library,c.library/'sources')
-    if shutil.disk_usage(sources).free<Path(path).stat().st_size+512*2**20:
-        raise Failure('游戏库可用空间不足，复制尚未开始。')
+    selections = c.r.get('nupSelections', {})
+    if not isinstance(selections, dict): raise Failure('无效的 NUP 内容选择。')
+    selection = selections.get(str(path))
     with tempfile.TemporaryDirectory(prefix='.nup-',dir=sources) as directory:
         stage=Path(directory)/'source.nup'
-        c.begin('复制游戏文件到游戏库');sha,size=copy_source(c,path,stage)
+        if selection is None:
+            if shutil.disk_usage(sources).free<Path(path).stat().st_size+512*2**20:
+                raise Failure('游戏库可用空间不足，复制尚未开始。')
+            c.begin('复制游戏文件到游戏库');sha,size=copy_source(c,path,stage)
+        else:
+            from nup_subset import write
+            before = path.stat()
+            with opened(c, path) as (parser, container):
+                chosen = select_packages(c, parser, container, selection)
+                write(c, parser, container, chosen, stage)
+            after = path.stat()
+            if (before.st_dev, before.st_ino, before.st_size, before.st_mtime_ns) != (after.st_dev, after.st_ino, after.st_size, after.st_mtime_ns):
+                raise Failure('复制期间源文件发生变化，请重新扫描。')
+            size = stage.stat().st_size
+            sha = digest(stage, c.progress)
         return register(c,path,stage,sha,size)
 
 
@@ -164,6 +210,13 @@ def register(c,path,stage,sha,size):
         expanded=sum(f[1] for f in n.files)
         selected=max((k for k in n.packages if k.kind in (parser.BASE,parser.UPDATE) and k.exefs!=parser.NO_DIR),key=lambda k:k.version)
         name,display,icon=control_data(c,parser,n,selected)
+        retail_origin = 'control' if display else 'container label'
+        if not display and hasattr(parser, 'display_label'):
+            candidate = parser.display_label(selected)
+            if isinstance(candidate, str):
+                import re
+                if re.fullmatch(r'[vV]?\d+\.\d+(?:\.\d+){0,2}', candidate.strip()):
+                    display = candidate.strip()
         name=name or profile['name']
     with c.lock():
         cat=c.catalog();game=next((g for g in cat['games'] if g['id']==tid),None)
@@ -174,9 +227,20 @@ def register(c,path,stage,sha,size):
         if dest.exists():
             if not dest.is_file() or digest(dest,c.progress)!=sha: raise Failure('托管源文件已丢失或内容发生改变，请重新导入。')
         for p in packages:
-            p.update(sourceKind='nup',metadataSchema=2,path=str(dest.relative_to(c.library)),size=size,sha256=sha,name=name)
+            p.update(sourceKind='nup',metadataSchema=2,path=str(dest.relative_to(c.library)),size=size,sha256=sha,name=name,sourceFilename=Path(path).name,sourceExpandedSize=expanded)
         newest=max((p for p in packages if p['type']!='dlc'),key=lambda p:p['version'])
-        if display: newest['display']=display
+        if display:
+            newest.update(display=display, retailVersionSource=retail_origin)
+        if game:
+            replaced = {package_key(package) for package in packages}
+            retained = [package for package in game['packages']
+                        if package_key(package) not in replaced and contained(c.library, c.library / package['path']).is_file()]
+            packages = sorted(retained + packages, key=lambda p: (p['type'] == 'dlc', p['version'], p['titleId']))
+            if not icon and retained:
+                cover_path = c.library / 'games' / tid / 'cover.jpg'
+                if cover_path.is_file(): icon = cover_path.read_bytes()
+        newest = max((p for p in packages if p['type'] != 'dlc'), key=lambda p: p['version'])
+        expanded = sum({p['path']: p.get('sourceExpandedSize', p['size']) for p in packages}.values())
         duplicate=bool(game and game['packages']==packages)
         if game is None:
             game=dict(id=tid,packages=[]);cat['games'].append(game)
@@ -208,3 +272,21 @@ def extract_dlc(c,source,destination):
         destination.mkdir(parents=True)
         parser.pack_dlc(n,app,dlc,destination,say=lambda s:c.check())
         if not dlc: (destination/'.empty').write_text('no DLC')
+
+
+def extract_registered_dlc(c, packages, destination):
+    groups = {}
+    for package in packages:
+        if package['type'] == 'dlc':
+            groups.setdefault(package['path'], set()).add(int(package['titleId'], 16))
+    destination.mkdir(parents=True)
+    for source, titles in groups.items():
+        with opened(c, contained(c.library, c.library / source)) as (parser, container):
+            _, _, _, dlc = parser.scan(container)
+            for title in sorted(titles):
+                c.check()
+                if title not in dlc: raise Failure('NUP 中缺少已登记的 DLC。')
+                image = destination / f'{title - container.aoc_base}.img'
+                if image.exists(): raise Failure('NUP DLC 索引冲突。')
+                parser.pack(container, dlc[title].romfs, image, say=lambda _: c.check(), step=lambda _: c.check())
+    if not groups: (destination / '.empty').write_text('no DLC')

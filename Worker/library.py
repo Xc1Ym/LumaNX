@@ -84,8 +84,63 @@ def scan_sources(c):
 
 
 def scan_import(c):
-    files,dumps=scan_sources(c)
-    return {'requiresKeys':any(p.suffix.lower()!='.nup' for p in files),'containers':len(files),'dumps':len(dumps)}
+    """Inspect source metadata without copying or registering game content."""
+    import dump, nup
+    files, dumps = scan_sources(c)
+    entries = []
+    for path in [*files, *dumps]:
+        c.check()
+        folder = path in dumps
+        fmt = 'Dump' if folder else path.suffix[1:].upper()
+        entry = dict(path=str(path), name=path.name, format=fmt,
+                     requiresKeys=fmt not in ('NUP', 'Dump'), packages=[])
+        entries.append(entry)
+        try:
+            if not folder:
+                entry['size'] = path.stat().st_size
+            if fmt == 'NUP':
+                with nup.opened(c, path) as (parser, container):
+                    _, profile, packages = nup.metadata(c, parser, container)
+                    entry['allowsPackageSelection'] = not container.siblings and len(packages) > 1
+                    if entry['allowsPackageSelection']:
+                        from nup_subset import size_groups, subset_size
+                        _, base, updates, dlc = parser.scan(container)
+                        by_type = {'update': updates, 'dlc': dlc}
+                        choices = {}
+                        for package in packages:
+                            kind = package['type']
+                            identifier = int(package['titleId'], 16) if kind == 'dlc' else package['version']
+                            choices[nup.package_key(package)] = base if kind == 'base' else by_type[kind][identifier]
+                        groups = size_groups(c, parser, container, choices)
+                        header, toc_header = parser.SUPER.size, parser.TOC.size
+                        entry['subsetSizing'] = dict(groups=groups, headerBytes=header, tocHeaderBytes=toc_header)
+                        for package in packages:
+                            package['standaloneBytes'] = subset_size(groups, {nup.package_key(package)}, header, toc_header)
+                    candidates = (k for k in container.packages if k.kind in (parser.BASE, parser.UPDATE) and k.exefs != parser.NO_DIR)
+                    selected = max(candidates, key=lambda k: k.version)
+                    name, display, _ = nup.control_data(c, parser, container, selected)
+                    if display:
+                        newest = max((p for p in packages if p['type'] != 'dlc'), key=lambda p: p['version'])
+                        newest['display'] = display
+                entry['title'] = name or profile['name']
+                entry['requirements'] = requirements(dict(sourceKind='nup', packages=packages), profile)
+            elif folder:
+                _, profile, packages = dump.scan(c, path)
+                entry['title'] = profile['name']
+                entry['requirements'] = requirements(dict(sourceKind='dump', packages=packages), profile)
+            elif fmt in ('NSZ', 'XCZ') or not c.keys.is_file():
+                entry['metadataDeferred'] = True
+                continue
+            else:
+                packages = container_packages(inspect(c, path))
+            entry['packages'] = [
+                {key: package.get(key) for key in ('type', 'version', 'display', 'titleId', 'name', 'standaloneBytes')}
+                for package in packages
+            ]
+        except (Failure, OSError) as error:
+            entry['error'] = str(error)
+    return {'requiresKeys': any(e['requiresKeys'] for e in entries), 'containers': len(files),
+            'dumps': len(dumps), 'entries': entries}
 
 
 def import_games(c):
@@ -225,15 +280,23 @@ def catalog(c):
         if selected: g['display']=selected['display'] or p['builds'].get(strategy.get('version',p['package']),{}).get('display',strategy.get('version',''))
         manifest=read(c.library/'games'/g['id']/'current/manifest.json',{})
         cover=c.library/'games'/g['id']/'cover.jpg'; g['cover']=str(cover) if cover.exists() else ''
-        g['ready']=bool(manifest)
+        nas_runtime=g.get('nasRuntime',{}) if not manifest else {}
+        g['playingFromNAS']=bool(nas_runtime)
+        g['ready']=bool(manifest or nas_runtime)
+        g['assetCompression']=bool((manifest or nas_runtime).get('assetCompression'))
+        g['assetCompressionCapable']=manifest.get('assetCompressionReader')==1
+        g['assetCompressionRequested']=bool(g.get('assetCompressionRequested',False))
         archive=g.get('runtimeArchive',{})
         g['archived']=bool(archive.get('path')) and not g['ready']
         g['archivePath']=archive.get('path')
         g['archiveSize']=archive.get('size')
         g['restoreSize']=archive.get('runtimeSize')
         if g['ready'] or g['archived']: g['missing']=[]
-        g['runtimeVersion']=manifest.get('version','') or archive.get('version','')
-        g['inputConfig']=manifest.get('inputConfig',True) if manifest else bool(selected_engine and selected_engine['inputConfig'])
+        g['runtimeVersion']=manifest.get('version','') or nas_runtime.get('version','') or archive.get('version','')
+        runtime_metadata = manifest or nas_runtime or archive
+        g['runtimeInternalVersion'] = runtime_metadata.get('internalVersion')
+        g['runtimeRetailVersion'] = runtime_metadata.get('retailVersion')
+        g['inputConfig']=(manifest or nas_runtime).get('inputConfig',True) if manifest or nas_runtime else bool(selected_engine and selected_engine['inputConfig'])
         g['needsPreparation']=bool(manifest) and (selected_engine is not None and manifest.get('engine') != selected_engine['fingerprint'] or bool(g['packages']) and manifest.get('sourceHashes') != sorted(x['sha256'] for x in g['packages']))
         if manifest and manifest.get('pipeline')!=pipeline: g['needsPreparation']=True
     cat['profiles']=[{'id':x['id'],'name':x['name'],'compatibility':x['compatibility'],'version':x['builds'].get(x['package'],{}).get('display','')} for x in ps.values()]

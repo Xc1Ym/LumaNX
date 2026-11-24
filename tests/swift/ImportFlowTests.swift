@@ -21,10 +21,16 @@ with (root/'operations.jsonl').open('a') as f:
 if r['operation']=='catalog':
     result=json.loads((root/'catalog.json').read_text())
 elif r['operation']=='scanImport':
-    sys.path.insert(0, \#(String(reflecting: URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent().appendingPathComponent("Worker").path)))
-    import library
-    from types import SimpleNamespace
-    result=library.scan_import(SimpleNamespace(r=r,begin=lambda *a:None,check=lambda:None))
+    entries=[]
+    for name in r['paths']:
+        path=pathlib.Path(name)
+        candidates=([path] if (path/'base/exefs').is_dir() else
+                    [child.parent.parent.parent for child in path.rglob('base/exefs/main.npdm')] +
+                    [child for child in path.rglob('*') if child.suffix.lower() in ('.nup','.nsp','.xci','.nsz','.xcz')]) if path.is_dir() else [path]
+        for candidate in candidates:
+            fmt='Dump' if candidate.is_dir() else candidate.suffix[1:].upper()
+            entries.append(dict(path=str(candidate),name=candidate.name,format=fmt,requiresKeys=fmt not in ('Dump','NUP'),packages=[]))
+    result={'entries':entries}
 elif r['operation']=='import':
     result={'imports':json.loads((root/'imports.json').read_text())}
 elif r['operation']=='preflight':
@@ -70,6 +76,28 @@ print(json.dumps({'schema':1,'taskId':r['taskId'],'type':'result','state':'compl
         try? await Task.sleep(nanoseconds:250_000_000)
         try? FileManager.default.removeItem(at:root)
     }
+    private func reviewAndImport(_ urls: [URL], store: Store) async throws {
+        store.addGames(urls)
+        try await waitUntil {store.importReview != nil}
+        let review = try XCTUnwrap(store.importReview)
+        store.confirmImport(review,paths:Set(review.entries.map(\.path)),prepare:store.prepareAfterImport)
+    }
+    func testPreviewDoesNotImportUntilConfirmationAndOnlyCopiesSelection() async throws {
+        let (root, store) = try fixture()
+        try configure(root,games:[],imports:[])
+        let first = root.appendingPathComponent("base.nup")
+        let second = root.appendingPathComponent("update.nup")
+        store.addGames([first, second])
+        try await waitUntil {store.importReview != nil}
+        XCTAssertFalse(operations(root).contains {$0["operation"] as? String == "import"})
+        let review = try XCTUnwrap(store.importReview)
+        store.confirmImport(review,paths:[second.path],prepare:false)
+        try await waitUntil {self.operations(root).contains {$0["operation"] as? String == "import"}}
+        let request = operations(root).first {$0["operation"] as? String == "import"}
+        XCTAssertEqual(request?["paths"] as? [String],[second.path])
+        await cleanup(root,store)
+    }
+
     func testMissingAndDeletedKeysRouteToKeyStepBeforeImport() async throws {
         let (root,store)=try fixture()
         XCTAssertFalse(store.importPrerequisitesReady())
@@ -77,9 +105,9 @@ print(json.dumps({'schema':1,'taskId':r['taskId'],'type':'result','state':'compl
         XCTAssertTrue(operations(root).isEmpty)
         store.showOnboarding=false;store.hasImportedKeys=true
         try FileManager.default.removeItem(at:store.privateRoot.appendingPathComponent("keys/prod.keys"))
-        store.addGames([root.appendingPathComponent("中文 游戏.nsp")])
+        try await reviewAndImport([root.appendingPathComponent("中文 游戏.nsp")],store:store)
         XCTAssertFalse(store.hasImportedKeys);XCTAssertEqual(store.onboardingStep,2)
-        XCTAssertTrue(operations(root).isEmpty)
+        XCTAssertFalse(operations(root).contains{$0["operation"] as? String == "import"})
         await cleanup(root,store)
     }
     func testDumpImportAndPreparationDoNotRequireKeys() async throws {
@@ -91,7 +119,7 @@ print(json.dumps({'schema':1,'taskId':r['taskId'],'type':'result','state':'compl
         try FileManager.default.createDirectory(at:folder.appendingPathComponent("base/romfs"),withIntermediateDirectories:true)
         var entry=game("0400000000010000");entry["sourceKind"]="dump"
         try configure(root,games:[entry],imports:[["id":"0400000000010000","duplicate":false]])
-        store.addGames([folder])
+        try await reviewAndImport([folder],store:store)
         XCTAssertFalse(store.showOnboarding)
         try await waitUntil {self.operations(root).contains{$0["operation"] as? String == "build"} && !store.executionBusy}
         let dumped=Store.decode(Game.self,entry)!
@@ -110,7 +138,7 @@ print(json.dumps({'schema':1,'taskId':r['taskId'],'type':'result','state':'compl
         try FileManager.default.createDirectory(at:dump.appendingPathComponent("base/romfs"),withIntermediateDirectories:true)
         try Data("synthetic".utf8).write(to:dump.appendingPathComponent("base/exefs/main.npdm"))
         try configure(root,games:[game("g1")],imports:[["id":"g1","duplicate":false]])
-        store.addGames([parent])
+        try await reviewAndImport([parent],store:store)
         try await waitUntil {store.games.count==1 && store.processes.isEmpty}
         XCTAssertFalse(store.showOnboarding)
         let ops=operations(root).compactMap{$0["operation"] as? String}
@@ -124,7 +152,7 @@ print(json.dumps({'schema':1,'taskId':r['taskId'],'type':'result','state':'compl
         try Data("synthetic transport fixture".utf8).write(to:source)
         var entry=game("0400000000010000");entry["sourceKind"]="nup"
         try configure(root,games:[entry],imports:[["id":"0400000000010000","duplicate":false]])
-        store.addGames([source])
+        try await reviewAndImport([source],store:store)
         try await waitUntil {self.operations(root).contains{$0["operation"] as? String == "build"} && !store.executionBusy}
         XCTAssertFalse(store.showOnboarding)
         let imported=Store.decode(Game.self,entry)!
@@ -141,7 +169,7 @@ print(json.dumps({'schema':1,'taskId':r['taskId'],'type':'result','state':'compl
         try FileManager.default.createDirectory(at:folder,withIntermediateDirectories:true)
         let nup=root.appendingPathComponent("game.nup");try Data("synthetic".utf8).write(to:nup)
         try Data("synthetic".utf8).write(to:folder.appendingPathComponent("game.nsp"))
-        store.addGames([folder,nup])
+        try await reviewAndImport([folder,nup],store:store)
         try await waitUntil {store.showOnboarding && store.processes.isEmpty}
         XCTAssertEqual(store.onboardingStep,2)
         XCTAssertTrue(operations(root).contains{$0["operation"] as? String == "scanImport"})
@@ -154,7 +182,7 @@ print(json.dumps({'schema':1,'taskId':r['taskId'],'type':'result','state':'compl
         let folder=root.appendingPathComponent("待扫描目录")
         try FileManager.default.createDirectory(at:folder,withIntermediateDirectories:true)
         try Data("synthetic".utf8).write(to:folder.appendingPathComponent("game.nsp"))
-        store.addGames([folder])
+        try await reviewAndImport([folder],store:store)
         try await waitUntil {store.showOnboarding && store.processes.isEmpty}
         XCTAssertEqual(store.onboardingStep,2)
         XCTAssertTrue(operations(root).contains{$0["operation"] as? String == "scanImport"})
@@ -207,7 +235,7 @@ print(json.dumps({'schema':1,'taskId':r['taskId'],'type':'result','state':'compl
             ["id":"g1","duplicate":false],["id":"g1","duplicate":false],
             ["id":"g2","duplicate":false],["id":"g3","duplicate":true],
             ["id":"g4","duplicate":false],["id":"g5","duplicate":false]])
-        store.addGames([root.appendingPathComponent("中文 游戏.nsp")])
+        try await reviewAndImport([root.appendingPathComponent("中文 游戏.nsp")],store:store)
         try await waitUntil {self.operations(root).filter{$0["operation"] as? String == "build"}.count==2 && !store.executionBusy}
         let ops=operations(root)
         XCTAssertEqual(Set(ops.filter{$0["operation"] as? String == "build"}.compactMap{$0["gameId"] as? String}),Set(["g1","g5"]))
@@ -218,7 +246,7 @@ print(json.dumps({'schema':1,'taskId':r['taskId'],'type':'result','state':'compl
     func testAutomaticPreparationCanBeDisabledAndPersists() async throws {
         let (root,store)=try fixture();store.hasImportedKeys=true;store.prepareAfterImport=false
         try configure(root,games:[game("g1")],imports:[["id":"g1","duplicate":false]])
-        store.addGames([root.appendingPathComponent("game.nsp")])
+        try await reviewAndImport([root.appendingPathComponent("game.nsp")],store:store)
         try await waitUntil {store.games.count==1 && store.processes.isEmpty}
         XCTAssertFalse(operations(root).contains{$0["operation"] as? String == "build"})
         let saved=try JSONDecoder().decode(Preferences.self,from:Data(contentsOf:store.privateRoot.appendingPathComponent("preferences.json")))
@@ -231,14 +259,14 @@ print(json.dumps({'schema':1,'taskId':r['taskId'],'type':'result','state':'compl
         let files=["base.XCI","update.NSZ","dlc.xcz","extra.nsp"].map {root.appendingPathComponent($0)}
         store.conversion.mode = .compress;store.conversion.target="xci"
         store.conversion.paths=["unrelated.nsp"]
-        store.addGames(files)
+        try await reviewAndImport(files,store:store)
         XCTAssertEqual(store.selection,"tasks")
-        XCTAssertEqual(store.tasks.first?.operation,"import")
-        XCTAssertEqual(store.tasks.first?.importPaths,files.map(\.path))
+        XCTAssertEqual(store.tasks.first(where:{$0.operation=="import"})?.operation,"import")
+        XCTAssertEqual(store.tasks.first(where:{$0.operation=="import"})?.importPaths,files.map(\.path))
         XCTAssertTrue(store.executionBusy)
         store.launch(Store.decode(Game.self,game("g1",ready:true))!)
         try await waitUntil {self.operations(root).contains{$0["operation"] as? String == "build"} && !store.executionBusy}
-        XCTAssertEqual(operations(root).first?["paths"] as? [String],files.map(\.path))
+        XCTAssertEqual(operations(root).first(where:{$0["operation"] as? String == "import"})?["paths"] as? [String],files.map(\.path))
         XCTAssertFalse(operations(root).contains {["convertFiles","launch"].contains($0["operation"] as? String ?? "")})
         XCTAssertEqual(store.conversion.paths,["unrelated.nsp"])
         XCTAssertEqual(store.conversion.mode,.compress)
@@ -252,6 +280,10 @@ print(json.dumps({'schema':1,'taskId':r['taskId'],'type':'result','state':'compl
         store.persistTask(failed)
         let saved=try JSONDecoder().decode(TaskRecord.self,from:Data(contentsOf:store.privateRoot.appendingPathComponent("jobs/failed-import.json")))
         store.retry(saved)
+        try await waitUntil {store.importReview != nil}
+        let review = try XCTUnwrap(store.importReview)
+        XCTAssertEqual(review.entries.map(\.path),paths)
+        store.confirmImport(review,paths:Set(paths),prepare:false)
         try await waitUntil {store.games.count==1 && store.processes.isEmpty}
         XCTAssertEqual(operations(root).filter{$0["operation"] as? String == "import"}.first?["paths"] as? [String],paths)
         XCTAssertFalse(operations(root).contains {$0["operation"] as? String == "build"})
@@ -260,16 +292,16 @@ print(json.dumps({'schema':1,'taskId':r['taskId'],'type':'result','state':'compl
     }
     func testCompressedInputCannotBypassImportPrerequisites() async throws {
         let (root,store)=try fixture()
-        store.addGames([root.appendingPathComponent("base.xci")])
+        try await reviewAndImport([root.appendingPathComponent("base.xci")],store:store)
         XCTAssertTrue(store.showOnboarding);XCTAssertEqual(store.onboardingStep,2)
         XCTAssertNotEqual(store.selection,"conversion")
-        XCTAssertTrue(operations(root).isEmpty);XCTAssertTrue(store.conversion.paths.isEmpty)
+        XCTAssertFalse(operations(root).contains{$0["operation"] as? String == "import"});XCTAssertTrue(store.conversion.paths.isEmpty)
         await cleanup(root,store)
     }
     func testMissingToolchainKeepsImportedGameWithoutBuilding() async throws {
         let (root,store)=try fixture(toolchainReady:false);store.hasImportedKeys=true
         try configure(root,games:[game("g1")],imports:[["id":"g1","duplicate":false]])
-        store.addGames([root.appendingPathComponent("game.nsp")])
+        try await reviewAndImport([root.appendingPathComponent("game.nsp")],store:store)
         try await waitUntil {store.selection=="settings"}
         XCTAssertEqual(store.games.count,1)
         XCTAssertFalse(operations(root).contains{$0["operation"] as? String == "build"})

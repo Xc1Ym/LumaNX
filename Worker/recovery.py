@@ -27,7 +27,7 @@ def game_root(c, category, game_id):
     return path
 
 
-def inventory(c, root):
+def inventory(c, root, on_bytes=None):
     if root.is_symlink() or not root.is_dir(): raise Failure('存档或运行目录不可用。')
     files={}; directories=[]
     for folder, dirs, names in os.walk(root,followlinks=False):
@@ -38,7 +38,9 @@ def inventory(c, root):
                 raise Failure('恢复目录包含符号链接或特殊文件，操作已停止。')
             relative=path.relative_to(root).as_posix()
             if stat.S_ISDIR(mode): directories.append(relative)
-            else: files[relative]={'size':path.stat().st_size,'sha256':digest(path,c.progress)}
+            else:
+                progress = c.progress if on_bytes is None else lambda done, total: on_bytes(relative, done)
+                files[relative] = {'size': path.stat().st_size, 'sha256': digest(path, progress)}
     return {'files':files,'directories':sorted(directories)}
 
 

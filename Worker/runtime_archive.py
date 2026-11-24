@@ -112,6 +112,8 @@ def archive(c):
             identifier=uuid.uuid4().hex;runtime=read(lean/'manifest.json',{})
             manifest=dict(schema=1,id=identifier,gameId=game_id,created=time.time(),reason='runtimeArchive',
                           kind='lumanx-runtime',storage='zip',name=game.get('name',game_id),version=runtime.get('version',''),**expected)
+            version_fields = {key: runtime[key] for key in ('internalVersion', 'retailVersion', 'retailVersionSource') if key in runtime}
+            manifest.update(version_fields)
             manifest_bytes = json.dumps(manifest, ensure_ascii=False, indent=2).encode('utf-8')
             manifest_hash = hashlib.sha256(manifest_bytes).hexdigest()
             final=root/identifier
@@ -130,7 +132,7 @@ def archive(c):
                 os.rename(stage, final)
             entry=dict(path=str(final),id=identifier,version=manifest['version'],created=manifest['created'],
                        size=(final/'runtime.zip').stat().st_size,runtimeSize=sum(v['size'] for v in expected['files'].values()),
-                       manifestHash=manifest_hash,compressed=True)
+                       manifestHash=manifest_hash,compressed=True,**version_fields)
             _record(c,game_id,entry);c.check()
             if current.resolve()!=source:raise Failure('The active runtime changed. Local files were kept; the NAS archive is verified.')
             c.begin('Release local compiled game space',5,5)
