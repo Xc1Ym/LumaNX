@@ -90,6 +90,35 @@ class EnvironmentTests(unittest.TestCase):
         with patch.object(self,'fake_probe',side_effect=outside):self.assertFalse(self.inspect()['内置 Python']['ok'])
         self.sha='wrong source';self.assertFalse(self.inspect()['着色器翻译组件']['ok'])
         self.fail={'dmsh_xlate'};self.assertFalse(self.inspect()['着色器翻译组件']['ok'])
+
+    def test_translator_source_check_uses_engine_digest_when_available(self):
+        tools = self.c.engine/'dm/gfx/tools'
+        vendor = self.c.engine/'dm/third_party/ryujinx/Fixture.cs'
+        vendor.parent.mkdir(parents=True)
+        vendor.write_bytes(b'original source')
+        chain = tools/'dmsh_chain.py'
+        chain.write_text(
+            'import hashlib, sys\n'
+            'from pathlib import Path\n'
+            'assert sys.argv[1:] == ["--xlate-source-sha"]\n'
+            'source = Path(__file__).parents[2] / "third_party/ryujinx/Fixture.cs"\n'
+            'print(hashlib.sha256(source.read_bytes()).hexdigest()[:16])\n'
+        )
+        translator = tools/'dmsh_xlate_bin/dmsh_xlate'
+        embedded = hashlib.sha256(vendor.read_bytes()).hexdigest()[:16]
+        translator.write_text(f'#!/bin/sh\necho {embedded}\n')
+        translator.chmod(0o700)
+        self.assertEqual(toolchain.check_shader_translator(self.c), (True, embedded))
+        vendor.write_bytes(b'changed source')
+        ok, detail = toolchain.check_shader_translator(self.c)
+        self.assertFalse(ok)
+        self.assertIn(hashlib.sha256(vendor.read_bytes()).hexdigest()[:16], detail)
+
+        translator.write_text(f'#!/bin/sh\necho {self.sha}\n')
+        chain.write_text('raise SystemExit("--xlate-source-sha failed")\n')
+        ok, detail = toolchain.check_shader_translator(self.c)
+        self.assertFalse(ok)
+        self.assertIn('--xlate-source-sha failed', detail)
     def test_missing_manifest_and_dotnet_failure_do_not_abort_other_checks(self):
         (self.c.runtime/'versions.json').write_text('malformed')
         self.fail={'dotnet','nx_extract','spirv-cross','zstd'}

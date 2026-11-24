@@ -84,6 +84,27 @@ class ExternalEngineTests(unittest.TestCase):
             with patch.dict(os.environ,{'DM_MAC_ONLY':value}):
                 exec(text.replace('pass','seen.append(sdk)'),scope);scope['tools_now']()
             self.assertEqual(scope['seen'],expected)
+
+    def test_conditional_tool_lock_preserves_upstream_metal_skip(self):
+        lock_tool=self.source/'dm/gfx/tools/tool_lock.py'
+        lock_tool.write_text(
+            "def tools_now(check_metal=True):\n"
+            "    seen = []\n"
+            "    for sdk in ('macosx', 'iphoneos') if check_metal else ():\n"
+            "        seen.append(sdk)\n"
+            "    return seen\n"
+        )
+        engine.adapt_snapshot(self.source)
+        text=lock_tool.read_text()
+        engine.adapt_snapshot(self.source)
+        self.assertEqual(lock_tool.read_text(),text)
+        scope={}
+        exec(text,scope)
+        for mac_only,expected in [('1',['macosx']),('0',['macosx','iphoneos'])]:
+            with self.subTest(mac_only=mac_only),patch.dict(os.environ,{'DM_MAC_ONLY':mac_only}):
+                self.assertEqual(scope['tools_now'](),expected)
+                self.assertEqual(scope['tools_now'](check_metal=False),[])
+
     def test_complete_cache_is_reused_without_sdk_or_compilation(self):
         mark_prepared(self.c)
         with patch('engine.find_sdk') as sdk,patch.object(self.c,'run') as run,contextlib.redirect_stdout(io.StringIO()):

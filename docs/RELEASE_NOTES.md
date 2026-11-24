@@ -1,13 +1,13 @@
-# LumaNX 0.4.4
+# LumaNX 0.4.5
 
 ## Changes
 
-- **Bundled nxnative update.** The engine advances from `33c734f` to `9b03dee`. The upstream changes include graphics and pipeline-cache updates, audio and video fixes, and improvements to NUP metadata, shader extraction and registered game profiles. Prepare games again after updating to refresh their runtime and shader artifacts. [Compare upstream commits](https://github.com/seedds/nxnative/compare/33c734f61963c6af738e1b79d99fab0930ea3bf3...9b03dee5d617138c6b98890abf8f1d68c0785511).
-- **Controller motion.** The upstream Mac engine adds passive Bluetooth DualShock 4 motion alongside Switch Pro Controller motion. LumaNX's native regression test uses the engine's pairing path and checks that it clears motion on focus loss and disconnect.
+- **Bundled nxnative update.** The engine advances from `9b03dee` to `73150dd`, including wired support for Xbox One controllers handled by the engine's macOS USB driver. Prepare games again after updating to refresh their runtime and shader artifacts. [Compare upstream commits](https://github.com/seedds/nxnative/compare/9b03dee5d617138c6b98890abf8f1d68c0785511...73150dd93e3d3c8039a83c8ad83f5ceca2db0f05).
+- **Shader preparation and export.** LumaNX validates shader libraries stored in packed images during game preparation and iOS export. The bundled translator is checked against nxnative's current source fingerprint, which includes the Ryujinx sources.
 
 ## Installation and validation
 
-Download **LumaNX-0.4.4-arm64.dmg** and verify the SHA-256 shown on the GitHub release. Quit the app and active tasks before replacing the application. The application identifier and existing libraries, saves and settings are retained.
+Download **LumaNX-0.4.5-arm64.dmg** and verify the SHA-256 shown on the GitHub release. Quit the app and active tasks before replacing the application. The application identifier and existing libraries, saves and settings are retained.
 
 Requires Apple Silicon and macOS 26+. Uses **ad-hoc signing and is not notarized**. Game preparation requires full Xcode with Metal; IPA export also requires the iOS platform and XcodeGen.
 
@@ -17,10 +17,10 @@ The release workflow runs Python and Swift regression tests, native controller a
 
 ## 中文说明
 
-- **更新内置 nxnative。** 引擎从 `33c734f` 更新至 `9b03dee`。上游更新包含图形与流水线缓存改进、音视频修复，以及 NUP 元数据、着色器提取和已登记游戏配置的更新。升级后请重新准备游戏，以更新运行时和着色器产物。 [查看上游提交对比](https://github.com/seedds/nxnative/compare/33c734f61963c6af738e1b79d99fab0930ea3bf3...9b03dee5d617138c6b98890abf8f1d68c0785511)。
-- **手柄体感。** Mac 端上游引擎在 Switch Pro 手柄之外新增蓝牙 DualShock 4 的被动体感读取。璃游的原生回归测试现通过引擎的实际配对路径，验证失焦和断开时是否清除体感状态。
+- **更新内置 nxnative。** 引擎从 `9b03dee` 更新至 `73150dd`，Mac 端引擎新增部分 Xbox One 手柄的 USB 直连支持。升级后请重新准备游戏，以更新运行时和着色器产物。[查看上游提交对比](https://github.com/seedds/nxnative/compare/9b03dee5d617138c6b98890abf8f1d68c0785511...73150dd93e3d3c8039a83c8ad83f5ceca2db0f05)
+- **着色器准备与导出。** 游戏准备与 iOS 导出现在可校验镜像格式的着色器库。内置翻译器按 nxnative 当前的源码指纹校验，覆盖编译所用的 Ryujinx 源文件。
 
-下载 **LumaNX-0.4.4-arm64.dmg**，按 GitHub Release 页面给出的 SHA-256 校验，退出应用及任务后替换应用。应用标识、现有游戏库、存档与设置保持兼容。
+下载 **LumaNX-0.4.5-arm64.dmg**，按 GitHub Release 页面给出的 SHA-256 校验，退出应用及任务后替换应用。应用标识、现有游戏库、存档与设置保持兼容。
 
 要求 Apple Silicon、macOS 26 及以上；采用临时签名，尚未公证。准备游戏需完整 Xcode 与 Metal，导出 IPA 另需 iOS 平台与 XcodeGen。
 

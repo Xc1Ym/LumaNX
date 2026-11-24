@@ -165,7 +165,7 @@ static void alias_index(const alias_key *k, int add) {
         if (add) {
             if (v && i < v->n) continue;
             if (!v || v->n == v->cap) {
-                uint32_t cap = v ? v->cap * 2 : 4; alias_cell *nv = realloc(v, sizeof *nv + cap * sizeof nv->e[0]); if (!nv) abort();
+                uint32_t cap = v ? v->cap * 2 : 4; alias_cell *nv = realloc(v, sizeof *nv + cap * sizeof nv->e[0]); if (!nv) ODIE("no memory for the texture sharing cells (%zu bytes)", sizeof *nv + cap * sizeof nv->e[0]);
                 if (!v) nv->n = 0; nv->cap = cap; v = nv; nvn_hm_put(&g_alias_cells, ck, v);
             }
             v->e[v->n].k = *k; v->e[v->n++].end = end;
@@ -611,6 +611,19 @@ void own_each_locked(void (^fn)(uint64_t serial, id o, int ghost)) {
         if (!tables[j]->vals[i]) continue;
         uint64_t k; memcpy(&k, tables[j]->keys + (size_t)i * 8, 8); fn(k, (__bridge id)tables[j]->vals[i], j);
     }
+}
+uint32_t own_drop_where_locked(int (^gone)(id o), void (^each)(uint64_t serial)) {
+    uint32_t n = 0;
+    for (int j = 0; j < 2; j++) {   // the keys first, then the deletes (a delete moves entries)
+        nvn_hmap *t = j ? &g_ghost : &g_by_serial; uint64_t *ks = NULL; uint32_t nk = 0;
+        for (uint32_t i = 0; i < t->cap; i++) {
+            if (!t->vals[i] || !gone((__bridge id)t->vals[i])) continue;
+            uint64_t *nks = realloc(ks, (nk + 1) * sizeof *ks); if (!nks) ODIE("the dropped serials"); ks = nks; memcpy(&ks[nk++], t->keys + (size_t)i * 8, 8);
+        }
+        for (uint32_t i = 0; i < nk; i++) { if (j) ghost_del_locked(ks[i]); else live_del_locked(ks[i]); if (each) each(ks[i]); }
+        n += nk; free(ks);
+    }
+    return n;
 }
 static void expect_one(CFMutableDictionaryRef want, id o) {   // o, and each texture it is a view of, once more
     for (; o; o = [o respondsToSelector:@selector(parentTexture)] ? ((id<MTLTexture>)o).parentTexture : nil)
