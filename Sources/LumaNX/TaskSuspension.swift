@@ -18,6 +18,11 @@ final class TaskSuspension {
     private var guardian: Process?
     private var journal: FileHandle?
     private var root: Identity?
+    private let deliver: (Identity, Int32) throws -> Bool
+
+    init(deliver: @escaping (Identity, Int32) throws -> Bool = TaskSuspension.signal) {
+        self.deliver = deliver
+    }
     var hasPendingCleanup: Bool { !stopped.isEmpty }
 
     static func identity(_ pid: Int32) -> Identity? {
@@ -104,7 +109,7 @@ final class TaskSuspension {
             record.append(10)
             try journal.write(contentsOf:record)
         }
-        guard try Self.signal(identity,SIGSTOP) else { return false }
+        guard try deliver(identity,SIGSTOP) else { return false }
         stopped.append(identity)
         return true
     }
@@ -122,19 +127,20 @@ final class TaskSuspension {
         process.standardOutput = FileHandle.nullDevice
         process.standardError = FileHandle.nullDevice
         try process.run()
+        try? pipe.fileHandleForReading.close()
         guardian = process
         journal = writer
     }
 
     func cancel() throws {
-        if let root { try Self.signal(root,SIGTERM) }
+        if let root { _ = try deliver(root,SIGTERM) }
         resume()
     }
 
     func resume() {
         var pending: [Identity] = []
         for process in stopped.reversed() {
-            do { try Self.signal(process,SIGCONT) }
+            do { _ = try deliver(process,SIGCONT) }
             catch { pending.append(process) }
         }
         stopped = Array(pending.reversed())

@@ -33,6 +33,55 @@ final class TaskSuspensionTests: XCTestCase {
         Thread.sleep(forTimeInterval:0.25)
         XCTAssertGreaterThan(try Data(contentsOf:output).count,paused.count)
     }
+    func testResumeKeepsFailedCleanupForRetry() throws {
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath:"/bin/sleep")
+        process.arguments = ["30"]
+        try process.run()
+        let identity = try XCTUnwrap(TaskSuspension.identity(process.processIdentifier))
+        defer {
+            try? TaskSuspension.signal(identity,SIGCONT)
+            process.terminate()
+        }
+        var rejectResume = true
+        let suspension = TaskSuspension { identity, action in
+            if action == SIGCONT && rejectResume { throw POSIXError(.EPERM) }
+            return try TaskSuspension.signal(identity,action)
+        }
+        try suspension.pause(identity)
+        suspension.resume()
+        XCTAssertEqual(suspension.stopped,[identity])
+        rejectResume = false
+        suspension.resume()
+        XCTAssertFalse(suspension.hasPendingCleanup)
+    }
+
+    func testGuardianCancelsAndResumesFromRecordedTokenOnPipeEOF() throws {
+        let worker = Process()
+        worker.executableURL = URL(fileURLWithPath:"/bin/sleep")
+        worker.arguments = ["30"]
+        try worker.run()
+        let identity = try XCTUnwrap(TaskSuspension.identity(worker.processIdentifier))
+        defer {
+            try? TaskSuspension.signal(identity,SIGCONT)
+            if worker.isRunning { worker.terminate() }
+        }
+        let script = URL(fileURLWithPath:#filePath).deletingLastPathComponent()
+            .deletingLastPathComponent().deletingLastPathComponent().appendingPathComponent("Worker/task_pause_guardian.py")
+        let guardian = Process(), journal = Pipe()
+        guardian.executableURL = URL(fileURLWithPath:"/usr/bin/python3")
+        guardian.arguments = ["-B","-I",script.path,String(decoding:try JSONEncoder().encode(identity),as:UTF8.self)]
+        guardian.standardInput = journal
+        try guardian.run()
+        try? journal.fileHandleForReading.close()
+        try journal.fileHandleForWriting.write(contentsOf:JSONEncoder().encode(identity) + Data([10]))
+        XCTAssertTrue(try TaskSuspension.signal(identity,SIGSTOP))
+        try journal.fileHandleForWriting.close()
+        let deadline = Date().addingTimeInterval(5)
+        while worker.isRunning, Date() < deadline { Thread.sleep(forTimeInterval:0.02) }
+        XCTAssertFalse(worker.isRunning)
+    }
+
     func testKernelRejectsMismatchedProcessGenerationWithoutStoppingLiveChild() throws {
         let process = Process()
         process.executableURL = URL(fileURLWithPath:"/bin/sleep")
