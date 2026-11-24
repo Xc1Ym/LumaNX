@@ -58,6 +58,7 @@ final class WorkerOutput: @unchecked Sendable {
     let resources: URL
     var processes: [String:Process] = [:]
     var suspensions: [String:TaskSuspension] = [:]
+    var workerIdentities: [String:TaskSuspension.Identity] = [:]
     var callbacks: [String:([String:Any])->Void] = [:]
     @Published var executionTask: String?
     var refreshTimer: Timer?
@@ -436,7 +437,9 @@ final class WorkerOutput: @unchecked Sendable {
             process.terminationHandler = { p in
                 pipe.fileHandleForReading.readabilityHandler = nil; err.fileHandleForReading.readabilityHandler = nil
                 DispatchQueue.main.asyncAfter(deadline:.now()+0.15) {
-                    self.suspensions.removeValue(forKey:id)?.resume()
+                    self.suspensions[id]?.resume()
+                    if self.suspensions[id]?.hasPendingCleanup == false { self.suspensions[id] = nil }
+                    self.workerIdentities[id] = nil
                     self.processes[id] = nil; try? FileManager.default.removeItem(at:file)
                     if operation=="catalog" {self.catalogWorkers=max(0,self.catalogWorkers-1)}
                     if operation=="converterStatus" {self.checkingConverter=false}
@@ -467,6 +470,7 @@ final class WorkerOutput: @unchecked Sendable {
             if visible { tasks.insert(.init(id:id,operation:operation,state:"running",gameId:extra["gameId"] as? String,started:Date().timeIntervalSince1970,outputPath:extra["outputPath"] as? String,conversion:Self.decode(ConversionJob.self,extra["conversion"]),importPaths:operation == "import" ? extra["paths"] as? [String] : nil,backupId:extra["backupId"] as? String,releaseId:extra["releaseId"] as? String,libraryId:preferences.libraryId),at:0) }
             callbacks[id] = completion; processes[id] = process
             try process.run()
+            workerIdentities[id] = TaskSuspension.identity(process.processIdentifier)
             if operation == "preflight" {lastWorkerEvent[id]=Date();watchEnvironmentWorker(id)}
         } catch {
             if operation=="converterStatus" {checkingConverter=false}
@@ -609,32 +613,61 @@ final class WorkerOutput: @unchecked Sendable {
         }
     }
     func canPause(_ task: TaskRecord) -> Bool {
-        ["build","exportIPA","convertFiles","archiveGame","restoreGame"].contains(task.operation) &&
-        ["running","paused"].contains(task.state) && processes[task.id]?.isRunning == true
+        if suspensions[task.id]?.hasPendingCleanup == true { return true }
+        return ["build","exportIPA","convertFiles","archiveGame","restoreGame"].contains(task.operation) &&
+            task.state == "running" && processes[task.id]?.isRunning == true && workerIdentities[task.id] != nil
     }
+
     func togglePause(_ task: TaskRecord) {
-        guard canPause(task), let process=processes[task.id],
-              let index=tasks.firstIndex(where:{$0.id==task.id}) else {return}
-        if let suspension=suspensions[task.id] {
+        guard canPause(task), let index = tasks.firstIndex(where:{$0.id == task.id}) else { return }
+        if let suspension = suspensions[task.id] {
             suspension.resume()
-            guard suspension.stopped.isEmpty else {error="Unable to resume the task. Please retry Resume.";return}
-            suspensions[task.id]=nil;tasks[index].state="running"
-        } else {
-            let suspension=TaskSuspension()
+            guard !suspension.hasPendingCleanup else { error = "Unable to resume the task. Please retry Resume."; return }
+            suspensions[task.id] = nil
+            if tasks[index].state == "paused" { tasks[index].state = "running" }
+        } else if let identity = workerIdentities[task.id] {
+            let suspension = TaskSuspension()
             do {
-                try suspension.pause(process.processIdentifier)
-                try suspension.guardAgainstAppExit(python:pythonExecutable(),script:resources.appendingPathComponent("Worker/task_pause_guardian.py"),root:process.processIdentifier)
+                try suspension.guardAgainstAppExit(python:pythonExecutable(),script:resources.appendingPathComponent("Worker/task_pause_guardian.py"),root:identity)
+                try suspension.pause(identity)
+            } catch {
+                suspension.resume()
+                if suspension.hasPendingCleanup {
+                    suspensions[task.id] = suspension
+                    tasks[index].state = "paused"
+                    persistTask(tasks[index])
+                }
+                self.error = "Unable to pause the task: \(error.localizedDescription)"
+                return
             }
-            catch {suspension.resume();self.error="Unable to pause the task: \(error.localizedDescription)";return}
-            suspensions[task.id]=suspension;tasks[index].state="paused"
+            suspensions[task.id] = suspension
+            tasks[index].state = "paused"
         }
         persistTask(tasks[index])
     }
-    func cancel(_ task: TaskRecord) {
-        if let i = tasks.firstIndex(where:{$0.id == task.id}) { tasks[i].state = "cancelling" }
-        processes[task.id]?.terminate()
-        suspensions.removeValue(forKey:task.id)?.resume()
+
+    private func stopWorker(_ id: String) throws {
+        if let suspension = suspensions[id] {
+            try suspension.cancel()
+            guard !suspension.hasPendingCleanup else { throw POSIXError(.EAGAIN) }
+            suspensions[id] = nil
+        } else if let identity = workerIdentities[id] {
+            try TaskSuspension.signal(identity,SIGTERM)
+        }
     }
+
+    func cancel(_ task: TaskRecord) {
+        do {
+            if processes[task.id]?.isRunning == true && workerIdentities[task.id] == nil && suspensions[task.id] == nil {
+                throw POSIXError(.ENOTSUP)
+            }
+            try stopWorker(task.id)
+            if let index = tasks.firstIndex(where:{$0.id == task.id}) { tasks[index].state = "cancelling" }
+        } catch {
+            self.error = "Unable to cancel the task. Please retry Cancel."
+        }
+    }
+
     func retry(_ task: TaskRecord) {
         if task.operation != "convertFiles",let libraryId=task.libraryId,libraryId != preferences.libraryId {error="请切换回任务所属游戏库后重试。";return}
         if task.operation == "convertFiles",let conversion=task.conversion {startConversion(conversion);return}
@@ -738,7 +771,6 @@ final class WorkerOutput: @unchecked Sendable {
         }
     }
     func terminate() {
-        processes.values.forEach { if $0.isRunning { $0.terminate() } }
-        suspensions.values.forEach {$0.resume()};suspensions.removeAll()
+        for id in Set(processes.keys).union(suspensions.keys) { try? stopWorker(id) }
     }
 }

@@ -22,7 +22,7 @@ final class TaskSuspensionTests: XCTestCase {
         let deadline=Date().addingTimeInterval(5)
         while !FileManager.default.fileExists(atPath:output.path),Date()<deadline {Thread.sleep(forTimeInterval:0.02)}
         XCTAssertTrue(FileManager.default.fileExists(atPath:output.path))
-        try suspension.pause(process.processIdentifier)
+        try suspension.pause(try XCTUnwrap(TaskSuspension.identity(process.processIdentifier)))
         XCTAssertGreaterThanOrEqual(suspension.stopped.count,2)
         Thread.sleep(forTimeInterval:0.1)
         let paused=try Data(contentsOf:output)
@@ -33,9 +33,20 @@ final class TaskSuspensionTests: XCTestCase {
         Thread.sleep(forTimeInterval:0.25)
         XCTAssertGreaterThan(try Data(contentsOf:output).count,paused.count)
     }
-    func testDescendantSelectionExcludesUnrelatedProcesses() {
-        let entries=[TaskSuspension.Entry(pid:10,parent:1,started:"a"),.init(pid:20,parent:10,started:"b"),.init(pid:30,parent:20,started:"c"),.init(pid:40,parent:1,started:"d")]
-        XCTAssertEqual(TaskSuspension.descendants(of:10,in:entries).map(\.pid),[20,30])
+    func testKernelRejectsMismatchedProcessGenerationWithoutStoppingLiveChild() throws {
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath:"/bin/sleep")
+        process.arguments = ["30"]
+        try process.run()
+        defer { process.terminate() }
+        let actual = try XCTUnwrap(TaskSuspension.identity(process.processIdentifier))
+        var replaced = actual.token
+        replaced[7] &+= 1
+        let stale = TaskSuspension.Identity(token:replaced)
+        XCTAssertFalse(try TaskSuspension.signal(stale,SIGSTOP))
+        XCTAssertThrowsError(try TaskSuspension().pause(stale))
+        XCTAssertTrue(process.isRunning)
+        XCTAssertTrue(try TaskSuspension.signal(actual,SIGCONT))
     }
 }
 
@@ -73,6 +84,7 @@ final class TaskSuspensionTests: XCTestCase {
             defer {if process.isRunning {kill(process.processIdentifier,SIGKILL)}}
             let task=TaskRecord(id:"fixture",operation:"build",state:"running")
             store.tasks=[task];store.processes[task.id]=process
+            store.workerIdentities[task.id]=TaskSuspension.identity(process.processIdentifier)
             store.togglePause(task)
             XCTAssertEqual(store.tasks.first?.state,"paused")
             XCTAssertNotNil(store.suspensions[task.id])
