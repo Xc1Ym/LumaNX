@@ -9,6 +9,7 @@ import json
 import os
 from pathlib import Path
 import platform
+import re
 import shlex
 import shutil
 import signal
@@ -65,8 +66,17 @@ def check_shader_translator(c):
     if not ok:
         return False, output
     try:
-        sources = (tools/'dmsh_xlate'/name for name in ('Program.cs', 'dmsh_xlate.csproj'))
-        expected = hashlib.sha256(b''.join(path.read_bytes() for path in sources)).hexdigest()[:16]
+        chain = tools/'dmsh_chain.py'
+        if b'--xlate-source-sha' in chain.read_bytes():
+            # New engines include the vendored Ryujinx inputs in this digest.
+            ok, expected = probe(c, [sys.executable, '-B', '-I', chain, '--xlate-source-sha'])
+            if not ok:
+                return False, expected
+            if not re.fullmatch(r'[0-9a-f]{16}', expected):
+                return False, f'Invalid source SHA from dmsh_chain.py: {expected}'
+        else:
+            sources = (tools/'dmsh_xlate'/name for name in ('Program.cs', 'dmsh_xlate.csproj'))
+            expected = hashlib.sha256(b''.join(path.read_bytes() for path in sources)).hexdigest()[:16]
     except OSError as error:
         return False, str(error)
     if output != expected:
