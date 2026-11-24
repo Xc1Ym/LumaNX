@@ -1,0 +1,160 @@
+import XCTest
+import Darwin
+@testable import LumaNX
+
+final class TaskSuspensionTests: XCTestCase {
+    func testPauseFreezesWorkerAndChildThenResumes() throws {
+        let root=FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at:root,withIntermediateDirectories:true)
+        defer {try? FileManager.default.removeItem(at:root)}
+        let output=root.appendingPathComponent("ticks")
+        let child=root.appendingPathComponent("child")
+        let process=Process()
+        process.executableURL=URL(fileURLWithPath:"/bin/sh")
+        process.arguments=["-c","/bin/sh -c 'while :; do echo tick >> \"$1\"; sleep 0.05; done' fixture \"$1\" & echo $! > \"$2\"; wait", "fixture",output.path,child.path]
+        try process.run()
+        let suspension=TaskSuspension()
+        defer {
+            suspension.resume()
+            if let text=try? String(contentsOf:child,encoding:.utf8),let pid=Int32(text.trimmingCharacters(in:.whitespacesAndNewlines)) {kill(pid,SIGTERM)}
+            if process.isRunning {process.terminate()}
+        }
+        let deadline=Date().addingTimeInterval(5)
+        while !FileManager.default.fileExists(atPath:output.path),Date()<deadline {Thread.sleep(forTimeInterval:0.02)}
+        XCTAssertTrue(FileManager.default.fileExists(atPath:output.path))
+        try suspension.pause(try XCTUnwrap(TaskSuspension.identity(process.processIdentifier)))
+        XCTAssertGreaterThanOrEqual(suspension.stopped.count,2)
+        Thread.sleep(forTimeInterval:0.1)
+        let paused=try Data(contentsOf:output)
+        Thread.sleep(forTimeInterval:0.25)
+        XCTAssertEqual(try Data(contentsOf:output),paused,"The child must stop writing too")
+        suspension.resume()
+        XCTAssertTrue(suspension.stopped.isEmpty)
+        Thread.sleep(forTimeInterval:0.25)
+        XCTAssertGreaterThan(try Data(contentsOf:output).count,paused.count)
+    }
+    func testResumeKeepsFailedCleanupForRetry() throws {
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath:"/bin/sleep")
+        process.arguments = ["30"]
+        try process.run()
+        let identity = try XCTUnwrap(TaskSuspension.identity(process.processIdentifier))
+        defer {
+            try? TaskSuspension.signal(identity,SIGCONT)
+            process.terminate()
+        }
+        var rejectResume = true
+        let suspension = TaskSuspension { identity, action in
+            if action == SIGCONT && rejectResume { throw POSIXError(.EPERM) }
+            return try TaskSuspension.signal(identity,action)
+        }
+        try suspension.pause(identity)
+        suspension.resume()
+        XCTAssertEqual(suspension.stopped,[identity])
+        rejectResume = false
+        suspension.resume()
+        XCTAssertFalse(suspension.hasPendingCleanup)
+    }
+
+    func testGuardianCancelsAndResumesFromRecordedTokenOnPipeEOF() throws {
+        let worker = Process()
+        worker.executableURL = URL(fileURLWithPath:"/bin/sleep")
+        worker.arguments = ["30"]
+        try worker.run()
+        let identity = try XCTUnwrap(TaskSuspension.identity(worker.processIdentifier))
+        defer {
+            try? TaskSuspension.signal(identity,SIGCONT)
+            if worker.isRunning { worker.terminate() }
+        }
+        let script = URL(fileURLWithPath:#filePath).deletingLastPathComponent()
+            .deletingLastPathComponent().deletingLastPathComponent().appendingPathComponent("Worker/task_pause_guardian.py")
+        let guardian = Process(), journal = Pipe()
+        guardian.executableURL = URL(fileURLWithPath:"/usr/bin/python3")
+        guardian.arguments = ["-B","-I",script.path,String(decoding:try JSONEncoder().encode(identity),as:UTF8.self)]
+        guardian.standardInput = journal
+        try guardian.run()
+        try? journal.fileHandleForReading.close()
+        try journal.fileHandleForWriting.write(contentsOf:JSONEncoder().encode(identity) + Data([10]))
+        XCTAssertTrue(try TaskSuspension.signal(identity,SIGSTOP))
+        try journal.fileHandleForWriting.close()
+        let deadline = Date().addingTimeInterval(5)
+        while worker.isRunning, Date() < deadline { Thread.sleep(forTimeInterval:0.02) }
+        XCTAssertFalse(worker.isRunning)
+    }
+
+    func testKernelRejectsMismatchedProcessGenerationWithoutStoppingLiveChild() throws {
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath:"/bin/sleep")
+        process.arguments = ["30"]
+        try process.run()
+        defer { process.terminate() }
+        let actual = try XCTUnwrap(TaskSuspension.identity(process.processIdentifier))
+        var replaced = actual.token
+        replaced[7] &+= 1
+        let stale = TaskSuspension.Identity(token:replaced)
+        XCTAssertFalse(try TaskSuspension.signal(stale,SIGSTOP))
+        XCTAssertThrowsError(try TaskSuspension().pause(stale))
+        XCTAssertTrue(process.isRunning)
+        XCTAssertTrue(try TaskSuspension.signal(actual,SIGCONT))
+    }
+}
+
+@MainActor final class TaskPauseStoreTests: XCTestCase {
+    func testHeartbeatDoesNotPretendCountersAdvanced() throws {
+        let root=FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer {try? FileManager.default.removeItem(at:root)}
+        let store=Store(privateRoot:root,resources:root)
+        var task=TaskRecord(id:"activity",operation:"build",state:"running")
+        task.done=5;task.total=100;task.lastProgressAt=123
+        store.tasks=[task]
+        store.event(["schema":1,"taskId":task.id,"type":"heartbeat","outputAt":456],visible:true)
+        XCTAssertNotNil(store.tasks[0].lastHeartbeat)
+        XCTAssertEqual(store.tasks[0].lastProgressAt,123)
+        XCTAssertEqual(store.tasks[0].lastOutputAt,456)
+        store.event(["schema":1,"taskId":task.id,"type":"progress","done":5,"total":100],visible:true)
+        XCTAssertEqual(store.tasks[0].lastProgressAt,123)
+        store.event(["schema":1,"taskId":task.id,"type":"progress","done":6,"total":100],visible:true)
+        XCTAssertGreaterThan(store.tasks[0].lastProgressAt ?? 0,123)
+    }
+    func testCancelAndQuitReleasePausedWorkers() async throws {
+        for quit in [false,true] {
+            let root=FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+            defer {try? FileManager.default.removeItem(at:root)}
+            let worker=root.appendingPathComponent("Worker")
+            let bin=root.appendingPathComponent("Runtime/python/bin")
+            try FileManager.default.createDirectory(at:worker,withIntermediateDirectories:true)
+            try FileManager.default.createDirectory(at:bin,withIntermediateDirectories:true)
+            try FileManager.default.createSymbolicLink(atPath:bin.appendingPathComponent("python3").path,withDestinationPath:"/usr/bin/python3")
+            let source=URL(fileURLWithPath:#filePath).deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent().appendingPathComponent("Worker/task_pause_guardian.py")
+            try FileManager.default.copyItem(at:source,to:worker.appendingPathComponent("task_pause_guardian.py"))
+            let store=Store(privateRoot:root,resources:root)
+            let process=Process();process.executableURL=URL(fileURLWithPath:"/bin/sleep");process.arguments=["30"]
+            try process.run()
+            defer {if process.isRunning {kill(process.processIdentifier,SIGKILL)}}
+            let task=TaskRecord(id:"fixture",operation:"build",state:"running")
+            store.tasks=[task];store.processes[task.id]=process
+            store.workerIdentities[task.id]=TaskSuspension.identity(process.processIdentifier)
+            store.togglePause(task)
+            XCTAssertEqual(store.tasks.first?.state,"paused")
+            XCTAssertNotNil(store.suspensions[task.id])
+            if quit {store.terminate()} else {store.cancel(store.tasks[0])}
+            let deadline=Date().addingTimeInterval(5)
+            while process.isRunning,Date()<deadline {try await Task.sleep(nanoseconds:20_000_000)}
+            XCTAssertFalse(process.isRunning)
+            XCTAssertTrue(store.suspensions.isEmpty)
+        }
+    }
+    func testPausedTaskRemainsActiveAndDoesNotLoseStateToBufferedHeartbeat() throws {
+        let root=FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer {try? FileManager.default.removeItem(at:root)}
+        let store=Store(privateRoot:root,resources:root)
+        let task=TaskRecord(id:"pause-fixture",operation:"build",state:"paused")
+        XCTAssertTrue(task.active)
+        store.tasks=[task]
+        store.suspensions[task.id]=TaskSuspension()
+        store.event(["schema":1,"taskId":task.id,"type":"heartbeat","state":"running"],visible:true)
+        XCTAssertEqual(store.tasks.first?.state,"paused")
+        store.event(["schema":1,"taskId":task.id,"type":"result","state":"completed"],visible:true)
+        XCTAssertEqual(store.tasks.first?.state,"completed")
+    }
+}

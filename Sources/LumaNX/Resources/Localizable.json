@@ -3614,5 +3614,77 @@
   {
     "source": "已解包游戏目前仅支持 Mac 运行，尚未开放 IPA 导出。",
     "en": "Decrypted game folders currently support Mac only. IPA export is not available yet."
+  },
+  {
+    "source": "已暂停",
+    "en": "Paused"
+  },
+  {
+    "source": "继续任务",
+    "en": "Resume"
+  },
+  {
+    "source": "暂停任务",
+    "en": "Pause"
+  },
+  {
+    "source": "暂停保留当前进程；退出应用仍会取消任务。",
+    "en": "Pause preserves the current processes; quitting the app still cancels the task."
+  },
+  {
+    "source": "任务已暂停，点击继续任务以恢复。",
+    "en": "Task paused. Click Resume to continue."
+  },
+  {
+    "source": "选择 NAS 归档文件夹",
+    "en": "Choose NAS archive folder"
+  },
+  {
+    "source": "归档已编译游戏？",
+    "en": "Archive compiled game?"
+  },
+  {
+    "source": "将复制并校验已编译游戏，然后移除本地运行文件以释放空间。存档和本地游戏缓存保留。恢复时不需要重新编译。",
+    "en": "Pack runtime-only shader assets, compress and verify the game on NAS, then remove its local runtime. Saves and local gameplay caches stay here. Restoring requires no recompilation."
+  },
+  {
+    "source": "归档到 NAS",
+    "en": "Archive to NAS"
+  },
+  {
+    "source": "归档到 NAS…",
+    "en": "Archive to NAS…"
+  },
+  {
+    "source": "恢复到本地",
+    "en": "Restore for play"
+  },
+  {
+    "source": "游戏已归档到 NAS；存档保留在本地。",
+    "en": "Game archived to NAS. Saves remain local."
+  },
+  {
+    "source": "游戏已恢复到本地，无需重新编译；NAS 副本保留。",
+    "en": "Game restored locally without recompiling. The NAS copy is retained."
+  },
+  {
+    "source": "已归档到 NAS，恢复到本地后可启动。",
+    "en": "Archived on NAS. Restore locally to play."
+  },
+  {
+    "source": "已编译游戏无需源文件即可游玩。添加更新或 DLC 前需重新导入源文件。",
+    "en": "Compiled game ready: source files are only needed again to rebuild or add updates/DLC."
+  },
+  {
+    "source": "重新构建所需内容",
+    "en": "Needed to rebuild or add new content"
+  },
+  {
+    "source": "NAS 归档：",
+    "en": "NAS archive: "
+  },
+  {
+    "source": "；恢复后本地：",
+    "en": " · Local after restore: "
   }
 ]

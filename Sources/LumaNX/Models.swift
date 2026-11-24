@@ -12,19 +12,26 @@ struct Game: Codable, Identifiable {
     var id: String; var name: String; var display: String; var packages: [NSPPackage]; var hidden: Bool
     var compatibility: String?; var missing: [String]?; var cover: String?; var ready: Bool?; var needsPreparation: Bool?; var inputConfig:Bool?; var preparationMode:String?; var preparationVersion:String?
     var runtimeVersion: String?
+    var buildMissing: [String]?
+    var archived: Bool?
+    var archivePath: String?
+    var archiveSize: Int64?
+    var restoreSize: Int64?
     var sourceKind: String?
     var canExportIPA: Bool { sourceKind != "dump" && sourceKind != "nup" }
     var compatibilityName: String { ["startup":L("仅验证启动"),"verified":L("Mac 已验证"),"experimental":L("实验性"),"unsupported":L("暂不支持")][compatibility ?? "unsupported"] ?? L("实验性") }
-    var buildable: Bool { compatibility != "unsupported" && (missing ?? []).isEmpty }
+    var buildable: Bool { compatibility != "unsupported" && (buildMissing ?? missing ?? []).isEmpty }
 }
 struct TaskRecord: Codable, Identifiable {
     var id: String; var operation: String; var state: String; var gameId: String?; var stage: String?; var message: String?
     var stageIndex: Int?; var stageCount: Int?; var started: Double?; var ended: Double?
     var done: Double?; var total: Double?; var elapsed: Double?; var unit: String?
+    var lastHeartbeat: Double?; var lastProgressAt: Double?; var lastOutputAt: Double?
     var outputPath: String?
     var outputFiles: [String]?
     var conversion: ConversionJob?
     var importPaths: [String]?
+    var archiveRoot: String?
     var backupId: String?
     var releaseId: String?
     var libraryId: String?
@@ -40,9 +47,9 @@ struct TaskRecord: Codable, Identifiable {
         guard let index=stageIndex,let count=stageCount,count>1,index>0 else {return nil}
         return min(1,max(0,(Double(index-1)+(progressFraction ?? 0))/Double(count)))
     }
-    var stateName: String { state == "completed" && hasWarnings ? L("完成（有警告）") : ["queued":L("排队"),"running":L("运行中"),"cancelling":L("取消中"),"cancelled":L("已取消"),"failed":L("失败"),"interrupted":L("中断"),"completed":L("完成")][state] ?? state }
-    var active: Bool { ["running","queued","cancelling"].contains(state) }
-    var title: String { ["backupSave":L("备份存档"),"restoreSave":L("恢复存档"),"activateRelease":L("切换运行版本"),"listRecovery":L("读取存档备份与运行版本"),"convertFiles":L("文件转换"),"conversionKeys":L("导入转换密钥"),"catalog":L("读取游戏库"),"saveInput":L("保存映射"),"worker":L("本地任务"),"setup":L("创建游戏库"),"clean":L("清理游戏文件"),"remove":L("移出游戏库"),"diagnostics":L("导出诊断"),"exportIPA":L("生成 IPA"),"prepareEngine":L("准备引擎工具"),"import":L("导入游戏"),"build":L("准备游戏"),"migrate":L("迁移构建"),"launch":L("运行游戏"),"keys":L("导入密钥"),"preflight":L("环境检查"),"installMetal":L("安装 Metal 编译组件"),"uninstallMetal":L("卸载 Metal 编译组件")][operation] ?? operation }
+    var stateName: String { state == "completed" && hasWarnings ? L("完成（有警告）") : ["queued":L("排队"),"running":L("运行中"),"paused":L("已暂停"),"cancelling":L("取消中"),"cancelled":L("已取消"),"failed":L("失败"),"interrupted":L("中断"),"completed":L("完成")][state] ?? state }
+    var active: Bool { ["running","paused","queued","cancelling"].contains(state) }
+    var title: String { ["archiveGame":L("归档到 NAS"),"restoreGame":L("恢复到本地"),"backupSave":L("备份存档"),"restoreSave":L("恢复存档"),"activateRelease":L("切换运行版本"),"listRecovery":L("读取存档备份与运行版本"),"convertFiles":L("文件转换"),"conversionKeys":L("导入转换密钥"),"catalog":L("读取游戏库"),"saveInput":L("保存映射"),"worker":L("本地任务"),"setup":L("创建游戏库"),"clean":L("清理游戏文件"),"remove":L("移出游戏库"),"diagnostics":L("导出诊断"),"exportIPA":L("生成 IPA"),"prepareEngine":L("准备引擎工具"),"import":L("导入游戏"),"build":L("准备游戏"),"migrate":L("迁移构建"),"launch":L("运行游戏"),"keys":L("导入密钥"),"preflight":L("环境检查"),"installMetal":L("安装 Metal 编译组件"),"uninstallMetal":L("卸载 Metal 编译组件")][operation] ?? operation }
 }
 struct ToolCheck: Decodable, Identifiable {
     var id: String { name }; var name: String; var ok: Bool; var message: String
@@ -72,7 +79,7 @@ struct InputConfig: Codable, Equatable {
         return out
     }
 }
-struct Preferences: Codable { var library: String = ""; var libraryId: String = ""; var developerDir = "/Applications/Xcode.app/Contents/Developer"; var onboardingComplete = false; var prepareAfterImport: Bool?; var language: String?; var appearance: String?; var engineDir: String?; var gameLanguage: String?; var gameLanguages: [String:String]?; var conversionOutput:String? }
+struct Preferences: Codable { var library: String = ""; var libraryId: String = ""; var developerDir = "/Applications/Xcode.app/Contents/Developer"; var onboardingComplete = false; var prepareAfterImport: Bool?; var language: String?; var appearance: String?; var engineDir: String?; var gameLanguage: String?; var gameLanguages: [String:String]?; var conversionOutput:String?; var archiveRoot:String? }
 
 func keyName(_ b: KeyBinding?) -> String {
     guard let b else { return L("未绑定") }

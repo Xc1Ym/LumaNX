@@ -57,6 +57,8 @@ final class WorkerOutput: @unchecked Sendable {
     let privateRoot: URL
     let resources: URL
     var processes: [String:Process] = [:]
+    var suspensions: [String:TaskSuspension] = [:]
+    var workerIdentities: [String:TaskSuspension.Identity] = [:]
     var callbacks: [String:([String:Any])->Void] = [:]
     @Published var executionTask: String?
     var refreshTimer: Timer?
@@ -145,7 +147,7 @@ final class WorkerOutput: @unchecked Sendable {
         let paths = (try? FileManager.default.contentsOfDirectory(at:privateRoot.appendingPathComponent("jobs"),includingPropertiesForKeys:nil)) ?? []
         for path in paths where path.pathExtension == "json" {
             guard let data = try? Data(contentsOf:path), var obj = (try? JSONSerialization.jsonObject(with:data)) as? [String:Any], let state = obj["state"] as? String else { continue }
-            if ["running","cancelling","queued"].contains(state) {
+            if ["running","paused","cancelling","queued"].contains(state) {
                 obj["state"] = "interrupted"; obj["message"] = "上次运行被中断，可验证已有阶段后重试。"
                 if let d = try? JSONSerialization.data(withJSONObject:obj) { try? d.write(to:path,options:.atomic) }
             }
@@ -390,7 +392,7 @@ final class WorkerOutput: @unchecked Sendable {
             self.hasImportedKeys = keys["ready"] as? Bool == true
             self.keyStatus = keys["message"] as? String ?? "尚未导入 prod.keys"
             if let records = Self.decode([TaskRecord].self,r["jobs"]) {
-                for rec in records where rec.state=="failed" || ["backupSave","restoreSave","activateRelease","setup","clean","remove","diagnostics","prepareEngine","import","build","exportIPA","convertFiles","launch","migrate","keys","installMetal","uninstallMetal"].contains(rec.operation) {
+                for rec in records where rec.state=="failed" || ["archiveGame","restoreGame","backupSave","restoreSave","activateRelease","setup","clean","remove","diagnostics","prepareEngine","import","build","exportIPA","convertFiles","launch","migrate","keys","installMetal","uninstallMetal"].contains(rec.operation) {
                     if !self.deletedTaskIDs.contains(rec.id),!self.tasks.contains(where: { $0.id == rec.id }) { self.tasks.append(rec) }
                 }
                 self.tasks.sort { ($0.started ?? 0) > ($1.started ?? 0) }
@@ -435,6 +437,9 @@ final class WorkerOutput: @unchecked Sendable {
             process.terminationHandler = { p in
                 pipe.fileHandleForReading.readabilityHandler = nil; err.fileHandleForReading.readabilityHandler = nil
                 DispatchQueue.main.asyncAfter(deadline:.now()+0.15) {
+                    self.suspensions[id]?.resume()
+                    if self.suspensions[id]?.hasPendingCleanup == false { self.suspensions[id] = nil }
+                    self.workerIdentities[id] = nil
                     self.processes[id] = nil; try? FileManager.default.removeItem(at:file)
                     if operation=="catalog" {self.catalogWorkers=max(0,self.catalogWorkers-1)}
                     if operation=="converterStatus" {self.checkingConverter=false}
@@ -465,6 +470,7 @@ final class WorkerOutput: @unchecked Sendable {
             if visible { tasks.insert(.init(id:id,operation:operation,state:"running",gameId:extra["gameId"] as? String,started:Date().timeIntervalSince1970,outputPath:extra["outputPath"] as? String,conversion:Self.decode(ConversionJob.self,extra["conversion"]),importPaths:operation == "import" ? extra["paths"] as? [String] : nil,backupId:extra["backupId"] as? String,releaseId:extra["releaseId"] as? String,libraryId:preferences.libraryId),at:0) }
             callbacks[id] = completion; processes[id] = process
             try process.run()
+            workerIdentities[id] = TaskSuspension.identity(process.processIdentifier)
             if operation == "preflight" {lastWorkerEvent[id]=Date();watchEnvironmentWorker(id)}
         } catch {
             if operation=="converterStatus" {checkingConverter=false}
@@ -496,6 +502,14 @@ final class WorkerOutput: @unchecked Sendable {
             if let index=checks.firstIndex(where:{$0.id==check.id}) {checks[index]=check} else {checks.append(check)}
         }
         if let i = tasks.firstIndex(where:{$0.id == id}) {
+            let now=Date().timeIntervalSince1970
+            if e["type"] as? String == "heartbeat" {tasks[i].lastHeartbeat=now}
+            if let output=(e["outputAt"] as? NSNumber)?.doubleValue,output.isFinite {tasks[i].lastOutputAt=output}
+            let incomingDone=(e["done"] as? NSNumber)?.doubleValue
+            let incomingTotal=(e["total"] as? NSNumber)?.doubleValue
+            if e["type"] as? String == "stage" || e["resetProgress"] as? Bool == true || ((incomingDone != nil || incomingTotal != nil) && (tasks[i].done != incomingDone || tasks[i].total != incomingTotal)) {
+                tasks[i].lastProgressAt=now
+            }
             if e["type"] as? String == "plan",let plan=Self.decode([Milestone].self,e["milestones"]),!plan.isEmpty,plan.allSatisfy(\.valid),Set(plan.map(\.id)).count==plan.count {
                 tasks[i].milestones=plan;tasks[i].milestone=nil;tasks[i].milestoneStarted=[:]
                 tasks[i].done=nil;tasks[i].total=nil;tasks[i].unit=nil
@@ -516,6 +530,7 @@ final class WorkerOutput: @unchecked Sendable {
             if let elapsed=(e["elapsed"] as? NSNumber)?.doubleValue {tasks[i].elapsed=elapsed}
             if let msg = e["message"] as? String, !msg.isEmpty { tasks[i].message = msg }
             if let state = e["state"] as? String { tasks[i].state = state }
+            if suspensions[id] != nil, e["type"] as? String != "result" {tasks[i].state="paused"}
             if let diagnostic=Self.decode(TaskDiagnostic.self,e["diagnostic"]) {
                 var records=tasks[i].diagnostics ?? []
                 if let existing=records.firstIndex(where:{$0.id==diagnostic.id}) {records[existing]=diagnostic}
@@ -540,7 +555,7 @@ final class WorkerOutput: @unchecked Sendable {
     }
     func enqueue(_ game: Game) {
         guard importPrerequisitesReady(requiresKeys:game.sourceKind != "dump" && game.sourceKind != "nup") else { return }
-        guard game.buildable else { error = (game.missing ?? []).joined(separator:"\n"); return }
+        guard game.buildable else { error = (game.buildMissing ?? game.missing ?? []).joined(separator:"\n"); return }
         guard !queue.contains(game.id), !tasks.contains(where: { $0.operation == "build" && $0.gameId == game.id && $0.active && !$0.id.hasPrefix("queued-") }) else { return }
         queue.append(game.id)
         let rec = TaskRecord(id:"queued-"+game.id,operation:"build",state:"queued",gameId:game.id,started:Date().timeIntervalSince1970)
@@ -577,7 +592,7 @@ final class WorkerOutput: @unchecked Sendable {
         guard game.canExportIPA else { error = "NUP 与已解包游戏目前仅支持 Mac 运行，尚未开放 IPA 导出。"; return }
         guard !executionBusy, queue.isEmpty else { error = "构建与游戏运行互斥，请等待当前任务结束。"; return }
         guard importPrerequisitesReady() else { return }
-        guard game.buildable else { error = (game.missing ?? []).joined(separator:"\n"); return }
+        guard game.buildable else { error = (game.buildMissing ?? game.missing ?? []).joined(separator:"\n"); return }
         let output: URL
         if let destination { output = destination }
         else {
@@ -597,16 +612,73 @@ final class WorkerOutput: @unchecked Sendable {
             self.reveal(URL(fileURLWithPath:result["outputPath"] as? String ?? output.path))
         }
     }
-    func cancel(_ task: TaskRecord) {
-        if let i = tasks.firstIndex(where:{$0.id == task.id}) { tasks[i].state = "cancelling" }
-        processes[task.id]?.terminate()
+    func canPause(_ task: TaskRecord) -> Bool {
+        if suspensions[task.id]?.hasPendingCleanup == true { return true }
+        return ["build","exportIPA","convertFiles","archiveGame","restoreGame"].contains(task.operation) &&
+            task.state == "running" && processes[task.id]?.isRunning == true && workerIdentities[task.id] != nil
     }
+
+    func togglePause(_ task: TaskRecord) {
+        guard canPause(task), let index = tasks.firstIndex(where:{$0.id == task.id}) else { return }
+        if let suspension = suspensions[task.id] {
+            suspension.resume()
+            guard !suspension.hasPendingCleanup else { error = "Unable to resume the task. Please retry Resume."; return }
+            suspensions[task.id] = nil
+            if tasks[index].state == "paused" { tasks[index].state = "running" }
+        } else if let identity = workerIdentities[task.id] {
+            let suspension = TaskSuspension()
+            do {
+                try suspension.guardAgainstAppExit(python:pythonExecutable(),script:resources.appendingPathComponent("Worker/task_pause_guardian.py"),root:identity)
+                try suspension.pause(identity)
+            } catch {
+                suspension.resume()
+                if suspension.hasPendingCleanup {
+                    suspensions[task.id] = suspension
+                    tasks[index].state = "paused"
+                    persistTask(tasks[index])
+                }
+                self.error = "Unable to pause the task: \(error.localizedDescription)"
+                return
+            }
+            suspensions[task.id] = suspension
+            tasks[index].state = "paused"
+        }
+        persistTask(tasks[index])
+    }
+
+    private func stopWorker(_ id: String) throws {
+        if let suspension = suspensions[id] {
+            try suspension.cancel()
+            guard !suspension.hasPendingCleanup else { throw POSIXError(.EAGAIN) }
+            suspensions[id] = nil
+        } else if let identity = workerIdentities[id] {
+            try TaskSuspension.signal(identity,SIGTERM)
+        }
+    }
+
+    func cancel(_ task: TaskRecord) {
+        do {
+            if processes[task.id]?.isRunning == true && workerIdentities[task.id] == nil && suspensions[task.id] == nil {
+                throw POSIXError(.ENOTSUP)
+            }
+            try stopWorker(task.id)
+            if let index = tasks.firstIndex(where:{$0.id == task.id}) { tasks[index].state = "cancelling" }
+        } catch {
+            self.error = "Unable to cancel the task. Please retry Cancel."
+        }
+    }
+
     func retry(_ task: TaskRecord) {
         if task.operation != "convertFiles",let libraryId=task.libraryId,libraryId != preferences.libraryId {error="请切换回任务所属游戏库后重试。";return}
         if task.operation == "convertFiles",let conversion=task.conversion {startConversion(conversion);return}
         if task.operation == "import",let paths=task.importPaths {addGames(paths.map {URL(fileURLWithPath:$0)});return}
         guard let game = games.first(where:{$0.id == task.gameId}) else { return }
-        if task.operation == "backupSave" { performRecovery("backupSave",game:game) }
+        if task.operation == "archiveGame" {
+            if let root=task.archiveRoot {runtimeTransfer("archiveGame",game:game,extra:["archiveRoot":root])}
+            else {archiveGame(game)}
+        }
+        else if task.operation == "restoreGame" {restoreGame(game)}
+        else if task.operation == "backupSave" { performRecovery("backupSave",game:game) }
         else if task.operation == "restoreSave" {
             if let id=task.backupId {performRecovery("restoreSave",game:game,extra:["backupId":id])}
         }
@@ -698,5 +770,7 @@ final class WorkerOutput: @unchecked Sendable {
             if game == nil { self.globalInput = config }; self.notice = "映射已保存，下次启动游戏时生效，无需重新编译。"; self.editingInput = false
         }
     }
-    func terminate() { processes.values.forEach { if $0.isRunning { $0.terminate() } } }
+    func terminate() {
+        for id in Set(processes.keys).union(suspensions.keys) { try? stopWorker(id) }
+    }
 }
