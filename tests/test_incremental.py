@@ -177,6 +177,40 @@ class IncrementalBuildTests(unittest.TestCase):
         self.assertTrue((Path(first['path'])/'romfs/empty').is_dir())
         self.assertEqual(self.delta(lambda:None),[])
 
+    def test_capture_helper_never_reads_rejected_paths(self):
+        from types import SimpleNamespace
+
+        patched = self.root / 'patched_v0'
+        capture = self.root / 'nro_v0'
+        target = self.root / 'other'
+        target.mkdir()
+        (target / 'nro.tsv').write_text('fixture')
+        locate = unittest.mock.Mock(return_value=capture)
+        upstream = SimpleNamespace(captured_nros=locate)
+        self.assertIsNone(build.verified_captured_nros(self.c, upstream, patched))
+
+        capture.symlink_to(target, target_is_directory=True)
+        with self.assertRaises(Failure):
+            build.verified_captured_nros(self.c, upstream, patched)
+        capture.unlink()
+        capture.mkdir()
+        manifest = capture / 'nro.tsv'
+        for mode in ('missing', 'symlink', 'directory', 'fifo'):
+            with self.subTest(mode=mode):
+                if mode == 'symlink':
+                    manifest.symlink_to(target / 'nro.tsv')
+                elif mode == 'directory':
+                    manifest.mkdir()
+                elif mode == 'fifo':
+                    os.mkfifo(manifest)
+                with self.assertRaises(Failure):
+                    build.verified_captured_nros(self.c, upstream, patched)
+                if mode == 'directory':
+                    manifest.rmdir()
+                elif mode != 'missing':
+                    manifest.unlink()
+        locate.assert_not_called()
+
     def test_retry_regenerates_deleted_or_modified_captured_nro_before_shader_reuse(self):
         self.profile.write_text(self.profile.read_text().replace('graphics\tvulkan', 'graphics\tnvn'))
         (self.profile.parent/'shader_map.tsv').write_text('vs_data.bin\t0\tvs\tkey\tsynthetic\n')
