@@ -334,7 +334,11 @@ def install(c,root,repo,gp,key,host,romfs,modules,shader,aoc=None,font=None):
     elif gp.get('graphics','nvn') not in ('vulkan','gl'):
         generate_tables(c,repo,stage/'shaders'/('b-'+chain),lambda name:stage/'profile'/name,root/'logs/c1.log',c.env(gp.id,root))
         if not (stage/'profile/c1_full.tsv').read_text().startswith('# chain b-'+chain+' '): raise Failure('着色器常量表版本不一致。')
-    if font: cp(font,'font')
+    if font: cp(font, 'font')
+    elif gp.id == '0400D4201C6EA000' and (repo / 'dm/tools/make_shared_fonts.py').is_file():
+        # Tennis's smaller font engine needs nxnative's reduced font set.
+        c.run([sys.executable, repo / 'dm/tools/make_shared_fonts.py', stage / 'font'],
+              root / 'logs/font.log', c.env(gp.id, root))
     else:
         (stage/'font').mkdir()
         fontpath=next((p for p in [Path('/System/Library/Fonts/Supplemental/Arial Unicode.ttf'),Path('/System/Library/Fonts/Helvetica.ttc')] if p.exists()),None)

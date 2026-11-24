@@ -1,8 +1,8 @@
 {
   "name": "LumaNX",
-  "displayName": "\u7483\u6e38 LumaNX",
-  "version": "0.4.4",
-  "build": "32",
+  "displayName": "璃游 LumaNX",
+  "version": "0.4.5",
+  "build": "33",
   "executable": "LumaNX",
   "bundleIdentifier": "org.nsmac.launcher",
   "minimumSystemVersion": "26.0",

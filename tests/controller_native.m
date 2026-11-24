@@ -28,6 +28,8 @@ void dm_touch_set(const dm_touch *t,int n) {(void)t;(void)n;}
 void dm_focus_set(int s) {(void)s;}
 void dm_audio_suspend(int s) {(void)s;}
 void dm_gfx_suspend(int s) {(void)s;}
+// The input tests never start a game window or drive its frame scheduler.
+void dm_fstep_settle(void) {abort();}
 void dm_haptics_apple_init(void) {}
 void dm_haptics_apple_controller(int p,GCController *c) {(void)p;(void)c;}
 void dm_haptics_apple_shutdown(void) {}
