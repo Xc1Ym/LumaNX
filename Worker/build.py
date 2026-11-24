@@ -233,14 +233,22 @@ def compile_host(c,up,repo,env,root,gp):
 
 def verified_captured_nros(c, upstream, patched):
     locate = getattr(upstream, 'captured_nros', None)
-    folder = locate(patched) if locate else None
-    if folder is None:
+    if locate is None:
         return None
-    folder = Path(folder)
     expected = patched.with_name('nro_' + patched.name.removeprefix('patched_'))
-    manifest = folder / 'nro.tsv'
+    manifest = expected / 'nro.tsv'
     try:
-        if folder != expected or folder.is_symlink() or manifest.is_symlink():
+        if expected.is_symlink():
+            raise ValueError()
+        if not expected.exists():
+            return None
+        if not expected.is_dir() or manifest.is_symlink() or not manifest.is_file():
+            raise ValueError()
+        folder = locate(patched)
+        if folder is None:
+            return None
+        folder = Path(folder)
+        if folder != expected:
             raise ValueError()
         captures = set()
         recorded = set()
