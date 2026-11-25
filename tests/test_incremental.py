@@ -177,6 +177,70 @@ class IncrementalBuildTests(unittest.TestCase):
         self.assertTrue((Path(first['path'])/'romfs/empty').is_dir())
         self.assertEqual(self.delta(lambda:None),[])
 
+    def test_capture_helper_never_reads_rejected_paths(self):
+        from types import SimpleNamespace
+
+        patched = self.root / 'patched_v0'
+        capture = self.root / 'nro_v0'
+        target = self.root / 'other'
+        target.mkdir()
+        (target / 'nro.tsv').write_text('fixture')
+        locate = unittest.mock.Mock(return_value=capture)
+        upstream = SimpleNamespace(captured_nros=locate)
+        self.assertIsNone(build.verified_captured_nros(self.c, upstream, patched))
+
+        capture.symlink_to(target, target_is_directory=True)
+        with self.assertRaises(Failure):
+            build.verified_captured_nros(self.c, upstream, patched)
+        capture.unlink()
+        capture.mkdir()
+        manifest = capture / 'nro.tsv'
+        for mode in ('missing', 'symlink', 'directory', 'fifo'):
+            with self.subTest(mode=mode):
+                if mode == 'symlink':
+                    manifest.symlink_to(target / 'nro.tsv')
+                elif mode == 'directory':
+                    manifest.mkdir()
+                elif mode == 'fifo':
+                    os.mkfifo(manifest)
+                with self.assertRaises(Failure):
+                    build.verified_captured_nros(self.c, upstream, patched)
+                if mode == 'directory':
+                    manifest.rmdir()
+                elif mode != 'missing':
+                    manifest.unlink()
+        locate.assert_not_called()
+
+    def test_retry_regenerates_deleted_or_modified_captured_nro_before_shader_reuse(self):
+        self.profile.write_text(self.profile.read_text().replace('graphics\tvulkan', 'graphics\tnvn'))
+        (self.profile.parent/'shader_map.tsv').write_text('vs_data.bin\t0\tvs\tkey\tsynthetic\n')
+        script = self.source / 'scripts/build_ipa_from_nsp.py'
+        script.write_text(script.read_text() + r"""
+import hashlib
+original_rewrite = rewrite
+original_split = split_shaders
+def captured_nros(patched):
+    path = patched.with_name('nro_' + patched.name.removeprefix('patched_'))
+    return path if (path / 'nro.tsv').exists() else None
+def rewrite(py, repo, exefs, out, env, logs, gp):
+    original_rewrite(py, repo, exefs, out, env, logs, gp)
+    capture = out.with_name('nro_' + out.name.removeprefix('patched_'))
+    capture.mkdir()
+    body = b'synthetic capture'
+    (capture / 'nro0.nro').write_bytes(body)
+    (capture / 'nro.tsv').write_text(f'nro0\t{hashlib.sha256(body).hexdigest()}\t{len(body)}\tgame.nrr\tcapture\n')
+def split_shaders(py, repo, roms, mains, pkg, env, logs, gp, **kwargs):
+    assert (Path(env['DM_NRO_DIR']) / 'nro0.nro').read_bytes() == b'synthetic capture'
+    original_split(py, repo, roms, mains, pkg, env, logs, gp, **kwargs)
+""")
+        self.build()
+        capture = self.work / 'nro_v1114112' / 'nro0.nro'
+        for change in (lambda: capture.unlink(), lambda: capture.write_bytes(b'x' * len(b'synthetic capture'))):
+            with self.subTest(change=change):
+                self.assertIn('rewrite', self.delta(change))
+                self.assertEqual(capture.read_bytes(), b'synthetic capture')
+        self.assertEqual(self.delta(lambda: None), [])
+
     def test_registered_nvn_cache_survives_controller_fix_and_legacy_adoption(self):
         self.profile.write_text(self.profile.read_text().replace('graphics\tvulkan','graphics\tnvn'))
         (self.profile.parent/'shader_map.tsv').write_text('vs_data.bin\t0\tvs\tkey\tsynthetic\n')
