@@ -3614,5 +3614,333 @@
   {
     "source": "已解包游戏目前仅支持 Mac 运行，尚未开放 IPA 导出。",
     "en": "Decrypted game folders currently support Mac only. IPA export is not available yet."
+  },
+  {
+    "source": "已暂停",
+    "en": "Paused"
+  },
+  {
+    "source": "继续任务",
+    "en": "Resume"
+  },
+  {
+    "source": "暂停任务",
+    "en": "Pause"
+  },
+  {
+    "source": "暂停保留当前进程；退出应用仍会取消任务。",
+    "en": "Pause preserves the current processes; quitting the app still cancels the task."
+  },
+  {
+    "source": "任务已暂停，点击继续任务以恢复。",
+    "en": "Task paused. Click Resume to continue."
+  },
+  {
+    "source": "选择 NAS 归档文件夹",
+    "en": "Choose NAS archive folder"
+  },
+  {
+    "source": "归档已编译游戏？",
+    "en": "Archive compiled game?"
+  },
+  {
+    "source": "将复制并校验已编译游戏，然后移除本地运行文件以释放空间。存档和本地游戏缓存保留。恢复时不需要重新编译。",
+    "en": "Pack runtime-only shader assets, compress and verify the game on NAS, then remove its local runtime. Saves and local gameplay caches stay here. Restoring requires no recompilation."
+  },
+  {
+    "source": "归档到 NAS",
+    "en": "Archive to NAS"
+  },
+  {
+    "source": "归档到 NAS…",
+    "en": "Archive to NAS…"
+  },
+  {
+    "source": "恢复到本地",
+    "en": "Restore for play"
+  },
+  {
+    "source": "游戏已归档到 NAS；存档保留在本地。",
+    "en": "Game archived to NAS. Saves remain local."
+  },
+  {
+    "source": "游戏已恢复到本地，无需重新编译；NAS 副本保留。",
+    "en": "Game restored locally without recompiling. The NAS copy is retained."
+  },
+  {
+    "source": "已归档到 NAS，恢复到本地后可启动。",
+    "en": "Archived on NAS. Restore locally to play."
+  },
+  {
+    "source": "已编译游戏无需源文件即可游玩。添加更新或 DLC 前需重新导入源文件。",
+    "en": "Compiled game ready: source files are only needed again to rebuild or add updates/DLC."
+  },
+  {
+    "source": "重新构建所需内容",
+    "en": "Needed to rebuild or add new content"
+  },
+  {
+    "source": "NAS 归档：",
+    "en": "NAS archive: "
+  },
+  {
+    "source": "；恢复后本地：",
+    "en": " · Local after restore: "
+  },
+  {
+    "source": "压缩游戏资源",
+    "en": "Compress game assets"
+  },
+  {
+    "source": "使用未压缩资源",
+    "en": "Use uncompressed assets"
+  },
+  {
+    "source": "压缩游戏资源（Zstandard）",
+    "en": "Compress game assets (Zstandard)"
+  },
+  {
+    "source": "可选。游戏运行时按需解压资源，存档单独保存。",
+    "en": "Optional. Assets decompress as needed while playing. Saves stay separate."
+  },
+  {
+    "source": "默认关闭。旧运行版本需要重新准备后才能使用压缩资源。",
+    "en": "Off by default. Older runtimes need preparation before compressed assets can be used."
+  },
+  {
+    "source": "使用压缩游戏资源？",
+    "en": "Use compressed game assets?"
+  },
+  {
+    "source": "使用未压缩游戏资源？",
+    "en": "Use uncompressed game assets?"
+  },
+  {
+    "source": "切换前会校验替换版本，随后移除之前的活动版本以释放空间。其他运行版本和存档保留。需要临时可用空间。此选择也适用于以后的准备。",
+    "en": "A replacement is verified before switching. The previous active release is then removed to reclaim space. Other releases and saves are kept. Temporary free space is required. This also sets your choice for future preparations."
+  },
+  {
+    "source": "此选择适用于下次准备。当前已编译游戏仍可运行。如有需要，请重新导入源文件并再次准备，以启用新的资源读取器。",
+    "en": "This choice applies to the next preparation. Your current compiled game remains playable. Reimport source packages if needed, then prepare again to enable the new asset reader."
+  },
+  {
+    "source": "使用压缩",
+    "en": "Use compression"
+  },
+  {
+    "source": "保持未压缩",
+    "en": "Keep uncompressed"
+  },
+  {
+    "source": "已为下次准备选择压缩。当前游戏文件已保留。",
+    "en": "Compression selected for the next preparation. Current game files were kept."
+  },
+  {
+    "source": "资源存储偏好已更新。",
+    "en": "Asset storage preference updated."
+  },
+  {
+    "source": "性能叠加层（帧率、GPU 时间、内存）",
+    "en": "Performance HUD (FPS, GPU time, memory)"
+  },
+  {
+    "source": "记录性能测试",
+    "en": "Record performance session"
+  },
+  {
+    "source": "下次启动时生效。记录会保存逐帧计时和报告；比较时请保持相同设置。",
+    "en": "Applies on next launch. Recording saves frame timings and reports; use the same settings for comparisons."
+  },
+  {
+    "source": "计时面板…",
+    "en": "Timing panel…"
+  },
+  {
+    "source": "性能报告…",
+    "en": "Performance reports…"
+  },
+  {
+    "source": "性能计时",
+    "en": "Performance timing"
+  },
+  {
+    "source": "手动计时标记",
+    "en": "Manual timing markers"
+  },
+  {
+    "source": "测试阶段",
+    "en": "Section"
+  },
+  {
+    "source": "游戏过程",
+    "en": "Gameplay"
+  },
+  {
+    "source": "加载",
+    "en": "Loading"
+  },
+  {
+    "source": "场景切换",
+    "en": "Transition"
+  },
+  {
+    "source": "可以开始阶段计时",
+    "en": "Ready to time a section"
+  },
+  {
+    "source": "请先启用性能记录并启动游戏",
+    "en": "Launch with session recording enabled first"
+  },
+  {
+    "source": "开始",
+    "en": "Start"
+  },
+  {
+    "source": "停止",
+    "en": "Stop"
+  },
+  {
+    "source": "标记卡顿",
+    "en": "Mark hitch"
+  },
+  {
+    "source": "手动测量包含反应时间。点击此面板不会激活启动器。",
+    "en": "Manual measurements include reaction time. This panel does not activate the launcher when clicked."
+  },
+  {
+    "source": "性能诊断（所有游戏）",
+    "en": "Performance diagnostics (all games)"
+  },
+  {
+    "source": "测试标签（例如：本地压缩）",
+    "en": "Run label (e.g. Local compressed)"
+  },
+  {
+    "source": "检查要导入的游戏",
+    "en": "Review game imports"
+  },
+  {
+    "source": "请选择要复制到游戏库的文件或文件夹。",
+    "en": "Choose which files or folders to copy into your library."
+  },
+  {
+    "source": "此文件的详细内容将在导入时读取。",
+    "en": "Package details will be read during import."
+  },
+  {
+    "source": "导入后准备游戏",
+    "en": "Prepare games after import"
+  },
+  {
+    "source": "导入所选内容",
+    "en": "Import selected"
+  },
+  {
+    "source": "展开的 NUP 内容可以单独选择。",
+    "en": "Select individual packages within a NUP bundle."
+  },
+  {
+    "source": "此更新需要同一 NUP 中的本体资源，请同时选择本体。",
+    "en": "This update uses base-game assets from the same NUP. Select the base game as well."
+  },
+  {
+    "source": "此 NUP 包含多个程序，需要完整导入。",
+    "en": "This NUP contains multiple programs and must be imported whole."
+  },
+  {
+    "source": "所选 NUP 内容已变化，请重新扫描。",
+    "en": "The selected NUP packages changed. Scan the source again."
+  },
+  {
+    "source": "复制所选 NUP 内容",
+    "en": "Copy selected NUP packages"
+  },
+  {
+    "source": "请选择本体或更新。",
+    "en": "Select a base game or an update."
+  },
+  {
+    "source": "无效的 NUP 内容选择。",
+    "en": "Invalid NUP package selection."
+  },
+  {
+    "source": "NUP 中缺少已登记的 DLC。",
+    "en": "A registered DLC package is missing from the NUP."
+  },
+  {
+    "source": "NUP DLC 索引冲突。",
+    "en": "NUP DLC packages have conflicting indexes."
+  },
+  {
+    "source": "复制期间源文件发生变化，请重新扫描。",
+    "en": "The source file changed during copying. Scan it again."
+  },
+  {
+    "source": "源文件：%@",
+    "en": "Source file: %@"
+  },
+  {
+    "source": "所选导入内容：%@",
+    "en": "Selected import: %@"
+  },
+  {
+    "source": "可单独选择 NUP 内容。各内容大小按单独导入计算；共享数据只计入所选大小一次。",
+    "en": "Select packages individually. Package sizes are shown separately, and shared data counts once in the selected size."
+  },
+  {
+    "source": "移至 NAS 并直接游玩",
+    "en": "Move to NAS for direct play"
+  },
+  {
+    "source": "选择 NAS 游玩文件夹",
+    "en": "Choose a folder on the NAS"
+  },
+  {
+    "source": "校验后移除本地运行文件。游戏直接从 NAS 加载资源，存档和构建任务保留在 Mac。",
+    "en": "After verification, the local runtime is removed. The game loads assets directly from the NAS. Saves and build tasks stay on this Mac."
+  },
+  {
+    "source": "游戏已移至 NAS，可直接启动。",
+    "en": "Game moved to the NAS and ready to launch."
+  },
+  {
+    "source": "直接从 NAS 游玩",
+    "en": "Playing directly from NAS"
+  },
+  {
+    "source": "请选择已挂载的 NAS 共享文件夹。",
+    "en": "Choose a mounted NAS share."
+  },
+  {
+    "source": "运行版本 %@",
+    "en": "Runtime %@"
+  },
+  {
+    "source": "已导入更新 %@",
+    "en": "Imported update %@"
+  },
+  {
+    "source": "已导入本体 %@",
+    "en": "Imported base %@"
+  },
+  {
+    "source": "来自文件名",
+    "en": "From filename"
+  },
+  {
+    "source": "移回此 Mac",
+    "en": "Move back to Mac"
+  },
+  {
+    "source": "NAS 存储",
+    "en": "NAS storage"
+  },
+  {
+    "source": "校验并启用本地副本，保留 NAS 副本。",
+    "en": "Verify and activate a local copy. The NAS copy is kept."
+  },
+  {
+    "source": "下次启动时生效。",
+    "en": "Applies on next launch."
   }
 ]

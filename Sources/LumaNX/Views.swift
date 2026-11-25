@@ -52,6 +52,9 @@ struct ContentView: View {
         }
         .frame(minWidth:1100,minHeight:720)
         .onAppear {store.checkEnvironmentAtStartup()}
+        .sheet(item:$store.importReview,onDismiss:store.applicationSheetDismissed) { review in
+            ImportReviewView(review:review,prepare:store.prepareAfterImport).environmentObject(store)
+        }
         .sheet(isPresented:$store.showOnboarding,onDismiss:store.onboardingDismissed) { OnboardingView().environmentObject(store) }
         .sheet(isPresented:$store.editingInput,onDismiss:store.applicationSheetDismissed) { InputEditor(game:store.inputGame, initial:store.input(for:store.inputGame)).environmentObject(store) }
         .alert(L("操作未完成"),isPresented:Binding(get:{!store.showOnboarding && store.error != nil},set:{if !$0 && !store.showOnboarding {store.error=nil}})) {
@@ -99,7 +102,15 @@ struct ContentView: View {
                                 GameCover(game:game).frame(width:76,height:76).clipShape(RoundedRectangle(cornerRadius:12)).accessibilityHidden(true)
                                 VStack(alignment:.leading,spacing:8) {
                                     Text(game.name).font(.headline).lineLimit(2)
-                                    Text(game.display.isEmpty ? L("版本待识别") : game.display).font(.caption).foregroundStyle(.secondary)
+                                    let runtime = game.runtimeVersionLabel
+                                    Text(runtime.map { String(format:L("运行版本 %@"),$0) } ?? (game.display.isEmpty ? L("版本待识别") : game.display))
+                                        .font(.caption).foregroundStyle(.secondary)
+                                    if let retail = game.importedRetailVersion {
+                                        let format = retail.isUpdate ? L("已导入更新 %@") : L("已导入本体 %@")
+                                        let label = String(format:format,retail.value) + " · " + retail.internalVersion
+                                        Text(retail.fromFilename ? label + " · " + L("来自文件名") : label)
+                                            .font(.caption).foregroundStyle(.secondary)
+                                    }
                                 }
                                 Spacer()
                                 Image(systemName:game.ready == true ? "checkmark.circle.fill" : "arrow.down.circle").foregroundStyle(game.ready == true ? .teal : .secondary)
@@ -156,6 +167,12 @@ struct GameDetail: View {
             }
             if game.ready==true {
                 Button {store.launch(game)} label:{Label(L("启动游戏"),systemImage:"play.fill").frame(maxWidth:.infinity)}.buttonStyle(.glassProminent).controlSize(.large).disabled(store.executionBusy || !store.queue.isEmpty)
+            } else if game.archived==true {
+                Label(L("已归档到 NAS，恢复到本地后可启动。"),systemImage:"externaldrive").font(.caption).foregroundStyle(.secondary)
+                if let archiveSize=game.archiveSize,let restoreSize=game.restoreSize {
+                    Text(L("NAS 归档：")+ByteCountFormatter.string(fromByteCount:archiveSize,countStyle:.file)+L("；恢复后本地：")+ByteCountFormatter.string(fromByteCount:restoreSize,countStyle:.file)).font(.caption).foregroundStyle(.secondary)
+                }
+                Button {store.restoreGame(game)} label:{Label(L("恢复到本地"),systemImage:"arrow.down.to.line").frame(maxWidth:.infinity)}.buttonStyle(.glassProminent).controlSize(.large).disabled(store.executionBusy || !store.queue.isEmpty)
             } else {
                 Button {store.enqueue(game)} label:{Label(L("准备运行文件"),systemImage:"hammer").frame(maxWidth:.infinity)}.buttonStyle(.glassProminent).controlSize(.large).disabled(!game.buildable)
                 if !(game.missing ?? []).isEmpty {
@@ -174,6 +191,13 @@ struct GameDetail: View {
                         ForEach(game.missing ?? [],id:\.self){Text(L($0)).font(.caption)}
                         Text(L("当前 nxnative 配置要求指定版本及着色器素材；这与 DLC 或本体是否完整无关。")).font(.caption).foregroundStyle(.secondary)
                     }
+                    if (game.ready==true || game.archived==true),game.packages.isEmpty {
+                        Text(L("已编译游戏无需源文件即可游玩。添加更新或 DLC 前需重新导入源文件。")).font(.caption).foregroundStyle(.secondary)
+                    }
+                    if (game.ready==true || game.archived==true),!game.packages.isEmpty,!(game.buildMissing ?? []).isEmpty {
+                        Label(L("重新构建所需内容"),systemImage:"hammer").font(.caption).foregroundStyle(.secondary)
+                        ForEach(game.buildMissing ?? [],id:\.self){Text(L($0)).font(.caption).foregroundStyle(.secondary)}
+                    }
                     if !game.packages.isEmpty {
                         Divider()
                         VStack(alignment:.leading,spacing:6) {
@@ -191,6 +215,12 @@ struct GameDetail: View {
                                             Spacer(minLength:8)
                                             Text(ByteCountFormatter.string(fromByteCount:package.size,countStyle:.file)).fixedSize()
                                         }.font(.caption).foregroundStyle(.secondary)
+                                        if let filename = package.sourceFilename, !filename.isEmpty {
+                                            Text(filename)
+                                                .font(.caption)
+                                                .foregroundStyle(.secondary)
+                                                .textSelection(.enabled)
+                                        }
                                     }.frame(maxWidth:.infinity,alignment:.leading)
                                 }
                             }
@@ -213,7 +243,7 @@ struct GameDetail: View {
         } message:{Text(L("仅处理托管副本；原始文件、存档和上次成功的运行版本保留。其他游戏仍在引用的共享文件会保留。"))}
     }
     private var displayedVersion:String {
-        if game.ready==true,let version=game.runtimeVersion,!version.isEmpty {return version}
+        if (game.ready==true || game.archived==true),let version=game.runtimeVersionLabel {return version}
         return game.display.isEmpty ? L("版本待识别") : game.display
     }
     private var gameTools:some View {
@@ -251,6 +281,66 @@ struct GameDetail: View {
                         .disabled(store.executionBusy)
                     toolDivider
                 }
+                if game.ready==true {
+                    GameToolCheckbox(title:"压缩游戏资源（Zstandard）",symbol:"archivebox",isOn:Binding(
+                        get:{game.assetCompressionRequested ?? false},
+                        set:{store.confirmAssetCompression(game,enabled:$0)}
+                    ),locked:store.executionBusy || !store.queue.isEmpty || game.playingFromNAS == true)
+                    .help(L("可选。游戏运行时按需解压资源，存档单独保存。"))
+                    toolDivider
+                    DisclosureGroup {
+                        let settingsLocked = store.executionBusy || !store.queue.isEmpty
+                        VStack(alignment:.leading,spacing:0) {
+                            GameToolCheckbox(title:"性能叠加层（帧率、GPU 时间、内存）",symbol:"gauge",isOn:Binding(
+                                get:{store.preferences.performanceHUD ?? false},
+                                set:{store.preferences.performanceHUD=$0;store.savePreferences()}
+                            ),locked:settingsLocked)
+                            .help(L("下次启动时生效。"))
+                            GameToolCheckbox(title:"记录性能测试",symbol:"record.circle",isOn:Binding(
+                                get:{store.preferences.recordPerformance ?? false},
+                                set:{store.preferences.recordPerformance=$0;store.savePreferences()}
+                            ),locked:settingsLocked)
+                            .help(L("下次启动时生效。记录会保存逐帧计时和报告；比较时请保持相同设置。"))
+                            TextField(L("测试标签（例如：本地压缩）"),text:Binding(
+                                get:{store.preferences.benchmarkLabel ?? ""},
+                                set:{store.preferences.benchmarkLabel=String($0.prefix(80));store.savePreferences()}
+                            ))
+                            .textFieldStyle(.roundedBorder)
+                            .padding(.leading,36).padding(.trailing,12).padding(.vertical,6)
+                            .disabled(settingsLocked)
+                            Button {store.showPerformancePanel(game)} label:{
+                                GameToolLabel(title:"计时面板…",symbol:"timer")
+                            }
+                            Button {store.openPerformanceReports(game)} label:{
+                                GameToolLabel(title:"性能报告…",symbol:"chart.bar.xaxis")
+                            }
+                        }.padding(.leading,6).background(.primary.opacity(0.025))
+                    } label: {
+                        GameToolLabel(title:"性能诊断（所有游戏）",symbol:"gauge.with.dots.needle.67percent")
+                    }.disclosureGroupStyle(GameToolDisclosureStyle())
+                    toolDivider
+                }
+                if game.ready == true || game.archived == true {
+                    DisclosureGroup {
+                        VStack(alignment:.leading,spacing:4) {
+                            if game.playingFromNAS == true {
+                                Label(L("直接从 NAS 游玩"),systemImage:"externaldrive.connected.to.line.below")
+                                    .font(.caption).foregroundStyle(.secondary)
+                                Button {store.moveNASGameBackToMac(game)} label:{GameToolLabel(title:"移回此 Mac",symbol:"arrow.down.to.line")}
+                                    .help(L("校验并启用本地副本，保留 NAS 副本。"))
+                            } else if game.archived == true {
+                                Button {store.restoreGame(game)} label:{GameToolLabel(title:"恢复到本地",symbol:"arrow.down.to.line")}
+                            } else {
+                                Button {store.publishPlayableGame(game)} label:{GameToolLabel(title:"移至 NAS 并直接游玩",symbol:"externaldrive.connected.to.line.below")}
+                                Button {store.archiveGame(game)} label:{GameToolLabel(title:"归档到 NAS…",symbol:"externaldrive.badge.plus")}
+                            }
+                        }.padding(6).background(.primary.opacity(0.025))
+                            .disabled(store.executionBusy || !store.queue.isEmpty)
+                    } label: {
+                        GameToolLabel(title:"NAS 存储",symbol:"externaldrive")
+                    }.disclosureGroupStyle(GameToolDisclosureStyle())
+                    toolDivider
+                }
                 DisclosureGroup {
                     VStack(alignment:.leading,spacing:4) {
                         Button {store.remove(game)} label:{GameToolLabel(title:"移出游戏库（保留文件与存档）",symbol:"minus.circle")}
@@ -283,6 +373,24 @@ private struct GameToolCardStyle:ViewModifier {
         content.clipShape(RoundedRectangle(cornerRadius:14)).glassSurface(14)
     }
 }
+private struct GameToolCheckbox: View {
+    let title: String
+    let symbol: String
+    @Binding var isOn: Bool
+    let locked: Bool
+
+    var body: some View {
+        HStack(spacing:0) {
+            GameToolLabel(title:title,symbol:symbol).accessibilityHidden(true)
+            Toggle(L(title),isOn:$isOn)
+                .toggleStyle(.checkbox)
+                .labelsHidden()
+                .padding(.trailing,12)
+                .disabled(locked)
+        }.contentShape(Rectangle())
+    }
+}
+
 private struct GameToolLabel:View {
     let title:String
     let symbol:String
@@ -391,6 +499,11 @@ struct TaskCard: View {
                 }
                 StatusPill(title:task.stateName,symbol:task.active ? "circle.dotted" : "circle.fill",color:task.hasWarnings || task.state=="failed" ? .orange : .secondary)
                 if task.active {
+                    if store.canPause(task) {
+                        Button(task.state == "paused" ? L("继续任务") : L("暂停任务")) {store.togglePause(task)}
+                            .controlSize(.small)
+                            .help(L("暂停保留当前进程；退出应用仍会取消任务。"))
+                    }
                     Button(task.operation=="launch" ? L("结束游戏") : L("取消任务")) {store.cancel(task)}.disabled(task.state=="cancelling").controlSize(.small)
                 } else if ["failed","interrupted","cancelled"].contains(task.state),task.gameId != nil || task.conversion != nil || task.importPaths != nil {
                     Button(L("重试")) {store.retry(task)}.disabled(store.executionBusy).controlSize(.small)

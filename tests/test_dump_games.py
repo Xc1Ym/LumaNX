@@ -106,10 +106,17 @@ class DumpGameTests(unittest.TestCase):
     def test_scan_preflight_uses_recursive_import_classifier(self):
         parent=self.root/'scan';parent.mkdir();self.source.rename(parent/'game')
         self.c.r['paths']=[str(parent)]
-        self.assertEqual(self.quiet(library.scan_import,self.c),dict(requiresKeys=False,containers=0,dumps=1))
-        self.assertEqual(self.c.catalog()['games'],[])
+        preview = self.quiet(library.scan_import, self.c)
+        entries = preview.pop('entries')
+        self.assertEqual(preview, dict(requiresKeys=False, containers=0, dumps=1))
+        self.assertEqual([entry['format'] for entry in entries], ['Dump'])
+        self.assertTrue(any(package['type'] == 'base' for package in entries[0]['packages']))
+        self.assertEqual(self.c.catalog()['games'], [])
         (parent/'ordinary.nsp').write_text('synthetic')
-        self.assertEqual(self.quiet(library.scan_import,self.c),dict(requiresKeys=True,containers=1,dumps=1))
+        mixed = self.quiet(library.scan_import, self.c)
+        self.assertTrue(mixed['requiresKeys'])
+        self.assertEqual([(entry['format'], entry['requiresKeys']) for entry in mixed['entries']],
+                         [('NSP', True), ('Dump', False)])
 
     def test_incomplete_dump_shape_does_not_prune_nested_containers(self):
         folder=self.root/'ordinary';(folder/'base/exefs').mkdir(parents=True)

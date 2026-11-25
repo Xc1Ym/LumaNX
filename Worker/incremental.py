@@ -38,7 +38,7 @@ def checkpoints(path):
 
 
 def pipeline_version(target='macos'):
-    names=('incremental.py','build.py','core.py','derived.py','dump.py','nup.py')+(('ipa.py',) if target=='ios' else ())
+    names=('incremental.py','build.py','core.py','derived.py','dump.py','nup.py','runtime_payload.py','compressed_assets.py','asset_storage.py')+(('ipa.py',) if target=='ios' else ())
     return hash_value({name:digest(WORKER/name) for name in names})
 
 
@@ -87,7 +87,7 @@ def worker_recipe(kind):
         coordinator[name]=[ast.dump(n) for n in tree.body if isinstance(n,ast.FunctionDef) and n.name in functions]
     entries={
         'unpack':{'build.py':('container_runner',),'dump.py':('extract',),'nup.py':('extract',)},
-        'dlc':{'build.py':('container_runner',),'dump.py':('extract_dlc',),'nup.py':('extract_dlc',)},
+        'dlc':{'build.py':('container_runner',),'dump.py':('extract_dlc',),'nup.py':('extract_registered_dlc',)},
         'profile':{'derived.py':('prepare_profile',)},
         'rewrite':{},
         'capture':{},
@@ -96,8 +96,15 @@ def worker_recipe(kind):
         'shaders':{'build.py':('ShaderProgress',),'derived.py':('validate_tables',)},
         'host':{'build.py':('compile_host',)},
     }
-    return dict(common=common,coordinator=hash_value(coordinator),functions={name:python_recipe(WORKER/name,functions)
+    recipe=dict(common=common,coordinator=hash_value(coordinator),functions={name:python_recipe(WORKER/name,functions)
         for name,functions in entries.get(kind,{}).items()})
+    # This signed, exact-recipe mapping covers the reviewed telemetry-only
+    # update. No game inputs, commands or output formats changed. Any further
+    # producer edit changes the recipe and therefore cannot use this mapping.
+    compatibility=cache_object(WORKER/'telemetry_recipe_compatibility.json').get(f'{sys.version_info.major}.{sys.version_info.minor}',{}).get(kind,{})
+    if recipe==compatibility.get('telemetry') and isinstance(compatibility.get('producer'),dict):
+        return compatibility['producer']
+    return recipe
 
 
 def kind_of(name):

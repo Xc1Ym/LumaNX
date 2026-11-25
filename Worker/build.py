@@ -10,14 +10,37 @@ from shader_artifacts import generate_tables, validate_library
 
 class ShaderProgress:
     """Count only finished reflection/library pairs; do not infer progress from queue order."""
-    def __init__(self,g,repo,cache):
+    def __init__(self,g,repo,cache,progress=None):
         self.keys=set()
         for line in g.table('shader_map.tsv').read_text().splitlines():
             columns=line.split('\t')
             if len(columns)>4 and (columns[0].endswith('.bin') or columns[0].startswith('main.rodata@')):self.keys.add(columns[3])
         chain=chain_of(repo,g)
         self.path=Path(cache)/('b-'+chain)
+        self.progress=Path(progress) if progress else None
+        self.latest=None
     def __call__(self):
+        if self.progress:
+            try:
+                value=json.loads(self.progress.read_text())
+                done,total=value['done'],value['total']
+                if not isinstance(done,(int,float)) or not isinstance(total,(int,float)) or not 0<=done<=total or total<=0: raise ValueError('invalid progress')
+                self.latest=value
+            except (OSError,ValueError,KeyError,TypeError): pass
+            value=self.latest
+            if value:
+                done,total=value['done'],value['total']
+                if value.get('step')=='cache check':
+                    return dict(done=done,total=total,unit='shaders',step='Checking shader cache')
+                if done<total:
+                    return dict(done=done,total=total,unit='shaders',step='Compiling shaders')
+                image=Path(str(self.path)+'.img.part')
+                try: size=image.stat().st_size
+                except OSError: size=None
+                if size is not None:
+                    return dict(done=size,total=None,unit='B',step=f'All {int(total):,} shaders compiled; packaging library')
+                return dict(done=None,total=None,unit='shaders',step=f'All {int(total):,} shaders compiled; finalizing shader tables')
+            return dict(done=None,total=None,unit='shaders',step='Preparing shader compiler')
         names=set(os.listdir(self.path)) if self.path.is_dir() else set()
         done=sum(k+'_b.json' in names and k+'_b.metallib' in names for k in self.keys)
         return {'done':done,'total':len(self.keys),'unit':'shaders','step':'编译并验证 Metal 库'}
@@ -216,11 +239,12 @@ def prepare(c,g,target='macos'):
             c.emit(resetProgress=True)
         def _out(self,text): pass
         def set(self,**kw):
+            previous=self.cur.step if self.cur else None
             super().set(**kw)
             if self.cur:
                 st=self.cur
-                # Estimated totals are intentionally indeterminate in the UI.
-                c.emit(message=st.step,done=st.done,total=None if st.est else st.total,unit=st.unit)
+                # A subphase can have a different unit or no measurable total.
+                c.emit(message=st.step,done=st.done,total=None if st.est else st.total,unit=st.unit,resetProgress=previous!=st.step)
         def say(self,msg): c.emit('message',msg)
     up.PROG=Bridge(); up.run=container_runner(c,g)
     return root,repo,env,up,gp,key
@@ -274,6 +298,19 @@ def verified_captured_nros(c, upstream, patched):
     return folder
 
 
+def release_version_fields(packages, internal_version, profile_display):
+    """Capture the selected release's display version before sources can be cleared."""
+    result = {'internalVersion': internal_version}
+    package = next((p for p in packages if p['type'] in ('base', 'update')
+                    and f"v{p['version']}" == internal_version), {})
+    for candidate, origin in ((package.get('display'), package.get('retailVersionSource', 'package')),
+                              (profile_display, 'profile')):
+        if isinstance(candidate, str) and re.fullmatch(r'[vV]?\d+\.\d+(?:\.\d+){0,2}', candidate.strip()):
+            result.update(retailVersion=candidate.strip().lstrip('vV'), retailVersionSource=origin)
+            break
+    return result
+
+
 def install(c,root,repo,gp,key,host,romfs,modules,shader,aoc=None,font=None):
     dst=c.library/'games'/gp.id; releases=dst/'releases'; releases.mkdir(parents=True,exist_ok=True)
     stage=dst/'install.partial'; shutil.rmtree(stage,ignore_errors=True); stage.mkdir()
@@ -281,7 +318,9 @@ def install(c,root,repo,gp,key,host,romfs,modules,shader,aoc=None,font=None):
         if src and Path(src).exists(): clone_tree(src,stage/name,c.progress)
     if Path(romfs).is_file(): clone(romfs,stage/'romfs.img',c.progress)
     else: cp(romfs,'romfs')
-    cp(modules,'modules'); cp(shader,'shaders'); cp(aoc,'aoc')
+    cp(modules,'modules'); cp(aoc,'aoc')
+    from runtime_payload import copy_shaders
+    copy_shaders(c,shader,stage/'shaders',chain_of(repo,gp),gp.get('graphics','nvn'))
     clone(host,stage/'dmhost'); os.chmod(stage/'dmhost',0o755)
     (stage/'profile').mkdir()
     for name in ['shader_map.tsv','pso_manifest.tsv']:
@@ -295,7 +334,11 @@ def install(c,root,repo,gp,key,host,romfs,modules,shader,aoc=None,font=None):
     elif gp.get('graphics','nvn') not in ('vulkan','gl'):
         generate_tables(c,repo,stage/'shaders'/('b-'+chain),lambda name:stage/'profile'/name,root/'logs/c1.log',c.env(gp.id,root))
         if not (stage/'profile/c1_full.tsv').read_text().startswith('# chain b-'+chain+' '): raise Failure('着色器常量表版本不一致。')
-    if font: cp(font,'font')
+    if font: cp(font, 'font')
+    elif gp.id == '0400D4201C6EA000' and (repo / 'dm/tools/make_shared_fonts.py').is_file():
+        # Tennis's smaller font engine needs nxnative's reduced font set.
+        c.run([sys.executable, repo / 'dm/tools/make_shared_fonts.py', stage / 'font'],
+              root / 'logs/font.log', c.env(gp.id, root))
     else:
         (stage/'font').mkdir()
         fontpath=next((p for p in [Path('/System/Library/Fonts/Supplemental/Arial Unicode.ttf'),Path('/System/Library/Fonts/Helvetica.ttc')] if p.exists()),None)
@@ -303,7 +346,17 @@ def install(c,root,repo,gp,key,host,romfs,modules,shader,aoc=None,font=None):
         clone(fontpath,stage/'font/standard.ttf')
         c.run([sys.executable,repo/'dm/tools/make_ext_font.py',stage/'font/nintendo_ext.ttf'],root/'logs/font.log',c.env(gp.id,root))
     manifest={'schema':1,'gameId':gp.id,'engine':read(root/'identity.json',{}).get('tools',{}).get('engine','external'),'cacheKey':key,'sourceHashes':read(root/'identity.json',{}).get('sources',[]),'chain':chain,'graphics':gp.get('graphics','nvn'),'version':gp.builds()[gp.get('package')]['display'],'inputConfig':read(root/'identity.json',{}).get('tools',{}).get('inputConfig',False),'created':time.time(),'preparationMode':'derived' if own else 'registered','pipeline':read(root/'identity.json',{}).get('pipeline')}
+    manifest.update(release_version_fields(c.game()['packages'], gp.get('package'), manifest['version']))
     from incremental import runtime_inventory
+    from compressed_assets import host_supports
+    capable=host_supports(stage/'dmhost')
+    manifest['assetCompressionReader']=1 if capable else 0
+    requested=bool(c.game().get('assetCompressionRequested',False))
+    if requested:
+        if not capable:raise Failure('This engine cannot read compressed assets. Use a compression-capable bundled engine or turn compression off.')
+        from asset_storage import convert_files
+        convert_files(c,stage,True)
+    manifest['assetCompression']=requested
     manifest['artifacts']=runtime_inventory(c,stage)
     atomic(stage/'manifest.json',manifest)
     validate_runtime(stage,gp)
@@ -321,6 +374,9 @@ def validate_runtime(path,gp=None):
     romfs=path/'romfs.img' if (path/'romfs.img').is_file() else path/'romfs'
     if not (path/'dmhost').is_file() or not (romfs.is_file() or romfs.is_dir()): raise Failure('运行目录不完整。')
     mods=gp.words('modules') if gp else [p.name.split('.')[0] for p in (path/'modules').glob('*.patched.bin')]
+    if gp and hasattr(gp, 'build_modules'):
+        main = gp.builds().get(gp.get('package'), {}).get('main')
+        mods = gp.build_modules().get(main, mods)
     if not mods: raise Failure('运行目录缺少代码模块。')
     for mod in mods:
         for ext in ('patched.bin','fixups.tsv','gates.tsv'):
@@ -329,7 +385,11 @@ def validate_runtime(path,gp=None):
         from derived import module
         rfs=module(Path(__file__).resolve().parents[1]/'Engine/nxnative/dm/tools/romfs.py','lumanx_runtime_romfs')
         try:
-            image=rfs.Image(romfs)
+            from compressed_assets import is_compressed,validate_romfs
+            if is_compressed(romfs):
+                if m.get('assetCompressionReader')!=1:raise ValueError('Compressed assets require a capable runtime')
+                image=validate_romfs(rfs,romfs)
+            else:image=rfs.Image(romfs)
             if gp and gp.get('romfs_marker'): image.find(gp.get('romfs_marker'))
         except FileNotFoundError: raise Failure('游戏资源缺少配置指定的文件。')
         except (OSError,ValueError): raise Failure('运行目录不完整。')
@@ -378,7 +438,10 @@ def build(c,target='macos'):
                 st.run('解包与合并 '+ver,[d],lambda d=d,upd=upd: dump.extract(c,upd or c.library/base['path'],d),milestone=f'unpack-{index}')
             elif g.get('sourceKind')=='nup':
                 import nup
-                st.run('解包与合并 '+ver,[d],lambda d=d,ver=ver:nup.extract(c,c.library/sources[0]['path'],int(ver[1:]),d),milestone=f'unpack-{index}')
+                package = next((p for p in g['packages'] if p['type'] in ('base', 'update') and f"v{p['version']}" == ver), None)
+                if package is None: raise Failure('NUP 中缺少所需游戏版本。')
+                source = contained(c.library, c.library / package['path'])
+                st.run('解包与合并 '+ver,[d],lambda d=d,ver=ver,source=source:nup.extract(c,source,int(ver[1:]),d),milestone=f'unpack-{index}')
             else:
                 st.run('解包与合并 '+ver,[d],lambda ver=ver,upd=upd: up.extract(c.nx(),c.keys,root/'extract',ver,c.library/base['path'],upd,None,logs,gp,**extraction),milestone=f'unpack-{index}')
         if own:
@@ -389,7 +452,7 @@ def build(c,target='macos'):
         aoc=root/'aoc'; dlcs=[(int(x['titleId'],16),x['version'],c.library/x['path']) for x in g['packages'] if x['type']=='dlc']
         def dlc():
             if g.get('sourceKind')=='dump': dump.extract_dlc(c,[p for p in g['packages'] if p['type']=='dlc'],aoc,gp.id)
-            elif g.get('sourceKind')=='nup': nup.extract_dlc(c,c.library/sources[0]['path'],aoc)
+            elif g.get('sourceKind')=='nup': nup.extract_registered_dlc(c, g['packages'], aoc)
             elif dlcs: up.extract_aoc(c.nx(),c.keys,repo,root,int(gp.id,16),{'dlc':dlcs},logs)
             else: aoc.mkdir(); (aoc/'.empty').write_text('no DLC')
         st.run('处理 DLC',[aoc],dlc,milestone='dlc')
@@ -432,10 +495,35 @@ def build(c,target='macos'):
                 decoder={'oodle':oodle} if oodle else {}
                 if 'dlc_roms' in signature(up.split_shaders).parameters:
                     decoder['dlc_roms']=dlc_sources(aoc)
+                # Upstream proves that only DLC-owned shader content changed before
+                # invoking this callback. Preserve registered module fixes/settings.
+                shader_profile=root/'shader-profiles'/gp.id
+                def derive_dlc_profile():
+                    nonlocal gp
+                    from derived import module
+                    up.nacp=module(repo/'dm/tools/nacp.py','lumanx_nacp')
+                    up.derive_profile(gp,shader_profile,gp.get('package'),selected,
+                                      gp.words('modules'),shader_only=True)
+                    gp=type(gp)(shader_profile)
+                    env.update(DM_GAMES_DIR=str(shader_profile.parent),DM_GAMES_FIRST='1')
+                    c.emit('message','Using verified DLC-only shader tables; registered module fixes are preserved.')
+                    return gp
+                if decoder.get('dlc_roms') and 'derive_dlc' in signature(up.split_shaders).parameters:
+                    decoder['derive_dlc']=derive_dlc_profile
                 st.run('提取并核对着色器',[sh/'pkg'],lambda:up.split_shaders(sys.executable,repo,[romfs_source(d) for d in dirs.values()]+[d/'glslc_capture' for d in dirs.values() if (d/'glslc_capture').exists()],[d/'ExeFS/main' for d in dirs.values()],sh/'pkg',env,logs,gp,**decoder),milestone='extract')
+                # A checkpoint can reuse the split without invoking its callback.
+                if (sh/'pkg.dlc.key').is_file() and (shader_profile/'game.tsv').is_file():
+                    gp=type(gp)(shader_profile)
+                    env.update(DM_GAMES_DIR=str(shader_profile.parent),DM_GAMES_FIRST='1')
+                if st.graph: st.graph.profile=gp
                 def shaders():
-                    up.PROG.stage('iOS shaders' if target=='ios' else 'Mac shaders',poll=ShaderProgress(gp,repo,sh/'ios' if target=='ios' else sh/'cache'))
-                    try: c.run([sys.executable,repo/'dm/gfx/tools/dmsh_build.py',sh/'pkg',sh/'cache'],logs/'dmsh_build.log',dict(env,IOSOUT=str(sh/'ios')) if target=='ios' else env)
+                    progress=sh/'progress.json';progress.unlink(missing_ok=True)
+                    benv=dict(env,DMSH_PROGRESS=str(progress))
+                    if target=='ios': benv['IOSOUT']=str(sh/'ios')
+                    compiler=repo/'dm/gfx/tools/dmsh_build.py'
+                    feed=progress if compiler.is_file() and 'DMSH_PROGRESS' in compiler.read_text() else None
+                    up.PROG.stage('iOS shaders' if target=='ios' else 'Mac shaders',poll=ShaderProgress(gp,repo,sh/'ios' if target=='ios' else sh/'cache',feed))
+                    try: c.run([sys.executable,repo/'dm/gfx/tools/dmsh_build.py',sh/'pkg',sh/'cache'],logs/'dmsh_build.log',benv)
                     finally: up.PROG.watch(None)
                     if target=='ios':
                         from ipa import validate_shaders
@@ -514,7 +602,10 @@ def launch(c):
     from toolchain import require_launch_environment
     require_launch_environment(c)
     with c.lock('execution'):
-        g=c.game(); runtime=c.library/'games'/g['id']/'current'; validate_runtime(runtime)
+        from nas_play import launch_paths
+        g=c.game(); current=c.library/'games'/g['id']/'current'
+        runtime,host=launch_paths(c,g,current)
+        if runtime == current: validate_runtime(runtime)
         c.begin('游戏运行中',1,1)
         save=c.library/'saves'/g['id']; temp=c.library/'temp'/g['id']; pso=c.library/'games'/g['id']/'pso_user/pipelines.tsv'
         for p in (save,temp,pso.parent): p.mkdir(parents=True,exist_ok=True)
@@ -526,12 +617,13 @@ def launch(c):
         else: cfg=None
         env=c.env(g['id'],temp); env.update(DM_WINDOW='1',DM_AUDIO='1',DM_LANG=language,DM_ROMFS=str(runtime/'romfs'),DM_SAVE=str(save),DM_TEMP=str(temp),DM_AOC_DIR=str(runtime/'aoc'),DM_FONT_DIR=str(runtime/'font'),DM_MSL_DIR=str(runtime/'shaders'),DM_NVN_SHMAP=str(runtime/'profile/shader_map.tsv'),DM_PSO_USER=str(pso))
         if (runtime/'romfs.img').is_file(): env['DM_ROMFS']=str(runtime/'romfs.img')
+        env['DM_ASSET_ZSTD_LIBRARY']=str(c.runtime/'lib/libzstd.1.dylib')
         if cfg: env['DM_INPUT_CONFIG']=str(cfg)
         # Always override inherited state; native controller policy is independent
         # of the optional keyboard/mouse mapping interface. Missing file = labels.
         env['DM_CONTROLLER_LAYOUTS']=str(c.private/'controller-layouts.json')
         log=c.private/'logs'/f'game-{g["id"]}.log'
-        try: c.run([runtime/'dmhost',runtime/'modules'],log,env,cwd=temp)
+        try: c.run([host,runtime/'modules'],log,env,cwd=temp)
         except Failure as error:
             with log.open('rb') as f:
                 f.seek(max(0,log.stat().st_size-16384)); tail=f.read().decode(errors='replace')

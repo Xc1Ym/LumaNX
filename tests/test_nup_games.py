@@ -6,6 +6,7 @@ import contextlib
 from collections import Counter
 import hashlib
 import io
+import json
 from pathlib import Path
 import shutil
 import sys
@@ -58,7 +59,12 @@ class NupGameTests(unittest.TestCase):
     def game(self): return self.c.catalog()['games'][0]
 
     def test_keyless_preflight_import_metadata_single_managed_copy_and_duplicate(self):
-        self.assertEqual(self.quiet(library.scan_import,self.c),dict(requiresKeys=False,containers=1,dumps=0))
+        preview = self.quiet(library.scan_import, self.c)
+        entries = preview.pop('entries')
+        self.assertEqual(preview, dict(requiresKeys=False, containers=1, dumps=0))
+        self.assertEqual([entry['format'] for entry in entries], ['NUP'])
+        self.assertTrue(any(package['type'] == 'base' for package in entries[0]['packages']))
+        self.assertEqual(self.c.catalog()['games'], [])
         with patch.object(self.c,'nx',side_effect=AssertionError('must not decrypt')): self.imported()
         game=self.game();self.assertEqual(game['sourceKind'],'nup');self.assertEqual(game['missing'],[])
         self.assertEqual(game['name'],'Synthetic Name');self.assertEqual(game['display'],'1.2')
@@ -117,6 +123,49 @@ class NupGameTests(unittest.TestCase):
         self.imported();out2=self.root/'fallback'
         self.quiet(nup.extract,self.c,self.c.library/self.game()['packages'][0]['path'],VERSION,out2)
         self.assertIsNotNone(rfs.Image(out2/'RomFS.img').find('removed'))
+
+    def test_captured_nro_is_revalidated_on_each_resume(self):
+        from types import SimpleNamespace
+        patched = self.root / 'patched_v1'
+        folder = self.root / 'nro_v1'
+        folder.mkdir()
+        nro = folder / 'nro0.nro'
+        content = b'captured image'
+        nro.write_bytes(content)
+        sha = hashlib.sha256(content).hexdigest()
+        (folder / 'nro.tsv').write_text(f'nro0\t{sha}\t{len(content)}\tgame.nrr\tcapture\n')
+        upstream = SimpleNamespace(captured_nros=lambda _: folder)
+        self.assertEqual(build.verified_captured_nros(self.c, upstream, patched), folder)
+        nro.write_bytes(b'x' * len(content))
+        with self.assertRaisesRegex(Failure, 'Captured NRO data failed validation'):
+            build.verified_captured_nros(self.c, upstream, patched)
+
+    def test_partial_import_copies_only_selected_extents_and_merges_later_update(self):
+        source = self.source.resolve()
+        base_key = f'base:0:{TITLE}'
+        update_key = f'update:{VERSION}:{int(TITLE, 16) + 0x800:016X}'
+        preview = self.quiet(library.scan_import, self.c)['entries'][0]
+        estimates = {p['type']: p['standaloneBytes'] for p in preview['packages']}
+        self.c.r['nupSelections'] = {str(source): [base_key]}
+        self.imported()
+        base = self.game()['packages'][0]
+        self.assertEqual(base['type'], 'base')
+        self.assertLess(base['size'], source.stat().st_size)
+        self.assertEqual(base['size'], estimates['base'])
+        with nup.opened(self.c, self.c.library / base['path']) as (parser, container):
+            _, _, updates, dlc = parser.scan(container)
+            self.assertEqual((updates, dlc), ({}, {}))
+        self.c.r['nupSelections'] = {str(source): [update_key]}
+        self.imported()
+        base_after, update = self.game()['packages']
+        self.assertEqual(base_after, base)
+        self.assertNotEqual(update['path'], base['path'])
+        self.assertEqual(update['size'], estimates['update'])
+        with nup.opened(self.c, self.c.library / update['path']) as (parser, container):
+            _, original_base, updates, dlc = parser.scan(container)
+            self.assertIsNone(original_base)
+            self.assertEqual((list(updates), dlc), ([VERSION], {}))
+        self.pipeline(expect_dlc=False)
 
     def test_ios_blocked_before_engine_and_source_mixing_rejected(self):
         self.imported()
@@ -238,7 +287,7 @@ class NupGameTests(unittest.TestCase):
     def test_full_pipeline_cache_install_image_validation_launch_and_tamper(self):
         self.imported();self.pipeline()
 
-    def pipeline(self):
+    def pipeline(self, expect_dlc=True):
         game=self.game();work=self.c.library/'cache'/TITLE/'fixture';work.mkdir(parents=True)
         gp=SimpleNamespace(id=TITLE,get=lambda k,d=None:{'package':f'v{VERSION}','graphics':'vulkan','romfs_marker':'dir/marker'}.get(k,d),
             words=lambda k,d=None:['main','sdk'] if k=='modules' else [d],builds=lambda:{f'v{VERSION}':{'display':'1.2'}},
@@ -263,7 +312,12 @@ class NupGameTests(unittest.TestCase):
              patch.object(self.c,'nx',side_effect=AssertionError('must not decrypt')),patch.object(self.c,'run',side_effect=run),\
              patch('build.compile_host',side_effect=host),patch('toolchain.require_launch_environment'):
             result=build.build(self.c);runtime=Path(result['path']);build.validate_runtime(runtime,gp)
-            self.assertTrue((runtime/'romfs.img').is_file());self.assertTrue((runtime/'aoc/1.img').is_file())
+            manifest = json.loads((runtime / 'manifest.json').read_text())
+            self.assertEqual(manifest['internalVersion'], gp.get('package'))
+            chosen = next(p for p in game['packages'] if f"v{p['version']}" == gp.get('package'))
+            if chosen['display'] == '1.2':
+                self.assertEqual(manifest['retailVersion'], '1.2')
+            self.assertTrue((runtime/'romfs.img').is_file());self.assertEqual((runtime/'aoc/1.img').is_file(), expect_dlc)
             build.launch(self.c);self.assertTrue(runs[-1][1]['DM_ROMFS'].endswith('romfs.img'))
             build.build(self.c);self.assertEqual(len(rewrites),1)
             managed=self.c.library/game['packages'][0]['path'];managed.write_bytes(b'changed')

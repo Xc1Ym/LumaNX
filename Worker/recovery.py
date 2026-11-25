@@ -1,6 +1,7 @@
 """Managed save snapshots and validated runtime switching, serialized with gameplay."""
 from __future__ import annotations
 import ctypes
+import json
 import math
 import os
 from pathlib import Path, PurePosixPath
@@ -26,7 +27,7 @@ def game_root(c, category, game_id):
     return path
 
 
-def inventory(c, root):
+def inventory(c, root, on_bytes=None):
     if root.is_symlink() or not root.is_dir(): raise Failure('存档或运行目录不可用。')
     files={}; directories=[]
     for folder, dirs, names in os.walk(root,followlinks=False):
@@ -37,7 +38,9 @@ def inventory(c, root):
                 raise Failure('恢复目录包含符号链接或特殊文件，操作已停止。')
             relative=path.relative_to(root).as_posix()
             if stat.S_ISDIR(mode): directories.append(relative)
-            else: files[relative]={'size':path.stat().st_size,'sha256':digest(path,c.progress)}
+            else:
+                progress = c.progress if on_bytes is None else lambda done, total: on_bytes(relative, done)
+                files[relative] = {'size': path.stat().st_size, 'sha256': digest(path, progress)}
     return {'files':files,'directories':sorted(directories)}
 
 
@@ -82,10 +85,10 @@ def backup(c):
         return {'backup':snapshot(c,c.game()['id'])}
 
 
-def backup_manifest(path, game_id):
+def backup_manifest(path, game_id, *, authenticated_bytes=None):
     try:
         if path.is_symlink() or (path/'manifest.json').is_symlink(): raise ValueError()
-        m=read(path/'manifest.json',{})
+        m=read(path/'manifest.json',{}) if authenticated_bytes is None else json.loads(authenticated_bytes)
         if not isinstance(m,dict): raise ValueError()
         if m.get('schema')!=1 or m.get('id')!=path.name or m.get('gameId')!=game_id: raise ValueError()
         if type(m.get('created')) not in (int,float) or not math.isfinite(m['created']) or not isinstance(m.get('reason'),str): raise ValueError()

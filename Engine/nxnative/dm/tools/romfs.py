@@ -28,14 +28,14 @@ MAGIC = b'DMROMFS1'
 
 
 class Image:
-    def __init__(self, path):
+    def __init__(self, path, opener=None, logical_size=None):
         self.path = _os.path.abspath(path)
         self.stat = _os.stat(self.path)
-        with builtins.open(self.path, 'rb') as f:
+        with (opener or builtins.open)(self.path, 'rb') as f:
             head = f.read(HEAD.size)
             if len(head) < HEAD.size: raise ValueError(f'invalid RomFS image header: {path}')
             magic, off, size, count = HEAD.unpack(head)
-            if magic != MAGIC or not 0 < count <= 0xffffffff or off < HEAD.size or off > self.stat.st_size or size != self.stat.st_size - off or count > size // ENT.size:
+            if magic != MAGIC or not 0 < count <= 0xffffffff or off < HEAD.size or off > (logical_size if logical_size is not None else self.stat.st_size) or size != (logical_size if logical_size is not None else self.stat.st_size) - off or count > size // ENT.size:
                 raise ValueError(f'invalid RomFS image header: {path}')
             f.seek(off); self.index = f.read(size)
         if len(self.index) != size: raise ValueError(f'incomplete RomFS image: {path}')
