@@ -19,6 +19,7 @@
 #include <string.h>
 #include <strings.h>
 #include <sys/clonefile.h>
+#include <sys/file.h>
 #include <sys/stat.h>
 #include <sys/sysctl.h>
 #include <sys/xattr.h>
@@ -117,9 +118,12 @@ typedef struct { CC_SHA256_CTX sha; FILE *out; ss_meta *m; uint32_t entries; uin
 
 static int pack_entry(packer *k, const char *abs, const char *rel, const struct stat *st) {
     char guest[1024]; ssize_t gl = getxattr(abs, GUEST_NAME, guest, sizeof guest, 0, XATTR_NOFOLLOW);
-    if (gl < 0) gl = 0;   // ENOATTR: the host name is the guest's
+    if (gl < 0) {
+        if (errno != ENOATTR) return -1;
+        gl = 0;   // ENOATTR: the host name is the guest's
+    }
     size_t pl = strlen(rel); int file = S_ISREG(st->st_mode);
-    if (pl > UINT16_MAX) return -1;
+    if (pl > UINT16_MAX) { errno = ENAMETOOLONG; return -1; }
     uint8_t h[ENT] = {(uint8_t)(file ? 2 : 1)}; uint16_t pl16 = (uint16_t)pl, gl16 = (uint16_t)gl;
     uint64_t size = file ? (uint64_t)st->st_size : 0; int64_t mt = st->st_mtimespec.tv_sec;
     memcpy(h + 2, &pl16, 2); memcpy(h + 4, &gl16, 2); memcpy(h + 8, &size, 8); memcpy(h + 16, &mt, 8);
@@ -135,8 +139,9 @@ static int pack_entry(packer *k, const char *abs, const char *rel, const struct 
         if (k->out && fwrite(k->buf, 1, (size_t)got, k->out) != (size_t)got) break;
         left -= (uint64_t)got;
     }
+    int read_err = left ? errno : 0;
     close(fd);
-    if (left) return -1;   // a failed read, or a file shorter than its size (the save is a clone no Commit touches, so not one being written)
+    if (left) { errno = read_err; return -1; }   // a failed read, or a file shorter than its size (the save is a clone no Commit touches, so not one being written)
     k->m->files++; k->m->bytes += (int64_t)size;
     if (mt > k->m->saved) k->m->saved = mt;
     return 0;
@@ -154,7 +159,10 @@ static int walk(const char *abs, const char *rel, packer *k) {
         else if (S_ISDIR(st.st_mode)) { if (!(r = pack_entry(k, a, p, &st))) r = walk(a, p, k); }
         else if (S_ISREG(st.st_mode)) r = pack_entry(k, a, p, &st);
     }
-    free_names(v, n); return r;
+    int err = r ? errno : 0;
+    free_names(v, n);
+    if (r) errno = err;
+    return r;
 }
 
 static int pack_save(const char *save, packer *k) {
@@ -172,25 +180,29 @@ static int pack_save(const char *save, packer *k) {
 int ss_scan(const char *save, ss_meta *m) {
     memset(m, 0, sizeof *m);
     packer *k = calloc(1, sizeof *k); if (!k) return -1;
-    k->m = m; int r = pack_save(save, k);
-    free(k); return r;
+    k->m = m; int r = pack_save(save, k), err = r ? errno : 0;
+    free(k);
+    if (r) errno = err;
+    return r;
 }
 
 int ss_pack(const char *save, const char *title, const char *out, ss_meta *m) {
     memset(m, 0, sizeof *m);
     upper_title(title, m->title, sizeof m->title); device_name(m->device, sizeof m->device);
     packer *k = calloc(1, sizeof *k); if (!k) return -1;
-    k->m = m; int r = -1;
+    k->m = m; int r = -1, err = 0;
     uint8_t hdr[HDR] = {0}; uint32_t version = 1;
-    if (!(k->out = fopen(out, "wb")) || fwrite(hdr, 1, HDR, k->out) != HDR || pack_save(save, k) || fwrite(END, 1, sizeof END, k->out) != sizeof END) goto done;
+    if (!(k->out = fopen(out, "wb")) || fwrite(hdr, 1, HDR, k->out) != HDR || pack_save(save, k) || fwrite(END, 1, sizeof END, k->out) != sizeof END) { err = errno; goto done; }
     memcpy(hdr, MAGIC, 8); memcpy(hdr + 8, &version, 4); memcpy(hdr + 12, &k->entries, 4); memcpy(hdr + 16, m->hash, strlen(m->hash));
     memcpy(hdr + 48, &m->saved, 8); memcpy(hdr + 56, m->title, strlen(m->title)); memcpy(hdr + 80, m->device, strlen(m->device));
-    if (fseeko(k->out, 0, SEEK_SET) || fwrite(hdr, 1, HDR, k->out) != HDR || fflush(k->out) || fsync(fileno(k->out))) goto done;
+    if (fseeko(k->out, 0, SEEK_SET) || fwrite(hdr, 1, HDR, k->out) != HDR || fflush(k->out) || fsync(fileno(k->out))) { err = errno; goto done; }
     r = 0;
 done:
-    if (k->out && fclose(k->out)) r = -1;
+    if (k->out && fclose(k->out)) { if (!err) err = errno; r = -1; }
     if (r) unlink(out);
-    free(k); return r;
+    free(k);
+    if (r) errno = err;
+    return r;
 }
 
 // A path in a packed save: under save/ or save_device/, with no empty, . or .. part (a damaged file must not write outside `into`)
@@ -344,14 +356,54 @@ static void prune_backups(const char *save, const char *side, const char *made) 
     free_names(v, k);
 }
 
-// A folder for a save about to be replaced: <save>-backups/<date> <side> (local: this device's, cloud: the cloud's); with prune, the oldest of that side beyond
-// KEEP_BACKUPS go now (a pull prunes once it is complete: a pull that fails keeps the backups it found)
-static int backup_dir(const char *save, const char *side, char *out, size_t n, int prune) {
+// A folder for a save about to be replaced: <save>-backups/<date> <side> (local: this device's, cloud: the cloud's).
+// Callers prune older backups only after their replacement has committed (a failure keeps every backup it found).
+static int backup_dir(const char *save, const char *side, char *out, size_t n) {
     char stamp[32]; time_t t = time(NULL); struct tm tm; localtime_r(&t, &tm); strftime(stamp, sizeof stamp, "%Y-%m-%d %H.%M.%S", &tm);
     snprintf(out, n, "%s-backups/%s %s", save, stamp, side);
     for (int k = 2; !access(out, F_OK); k++) snprintf(out, n, "%s-backups/%s %s %d", save, stamp, side, k);
-    if (mkdirs(out)) return -1;
-    if (prune) prune_backups(save, side, out);
+    return mkdirs(out);
+}
+
+#define CLOUD_STAGE_PREFIX ".cloud-stage."
+// Remove owned cloud-backup staging left behind if a previous mount was interrupted mid-restore; dated backups and player folders are untouched
+static void clean_backup_staging(const char *save) {
+    char dir[PATH_MAX], **v; size_t n;
+    if (snprintf(dir, sizeof dir, "%s-backups", save) >= (int)sizeof dir) return;
+    if (names_of(dir, &v, &n)) return;
+    for (size_t i = 0; i < n; i++) {
+        if (strncmp(v[i], CLOUD_STAGE_PREFIX, sizeof CLOUD_STAGE_PREFIX - 1)) continue;
+        char p[PATH_MAX];
+        if (snprintf(p, sizeof p, "%s/%s", dir, v[i]) < (int)sizeof p && rm_tree(p))
+            SRED("cannot remove leftover backup staging %s (errno=%d)", p, errno);
+    }
+    free_names(v, n);
+}
+
+// Restore a cloud archive into same-filesystem staging outside the dated-backup naming convention, verify it completely via ss_read,
+// atomically publish it to a collision-free backup name, and only then prune older cloud backups
+static int backup_cloud_restore(const char *save, const char *bundle, ss_meta *other, char *kept, size_t kn) {
+    static _Atomic unsigned seq;
+    char dir[PATH_MAX], stage[PATH_MAX], stamp[32];
+    kept[0] = 0;
+    if (snprintf(dir, sizeof dir, "%s-backups", save) >= (int)sizeof dir) { errno = ENAMETOOLONG; return -1; }
+    if (mkdirs(dir)) return -1;
+    if (snprintf(stage, sizeof stage, "%s/%s%d-%u", dir, CLOUD_STAGE_PREFIX, (int)getpid(), atomic_fetch_add(&seq, 1)) >= (int)sizeof stage) {
+        errno = ENAMETOOLONG; return -1;
+    }
+    if (mkdir(stage, 0755)) return -1;
+    if (ss_read(bundle, stage, other)) {
+        int e = errno; rm_tree(stage); errno = e; return -1;
+    }
+    time_t t = time(NULL); struct tm tm; localtime_r(&t, &tm); strftime(stamp, sizeof stamp, "%Y-%m-%d %H.%M.%S", &tm);
+    for (int k = 1; ; k++) {
+        int w = k == 1 ? snprintf(kept, kn, "%s/%s cloud", dir, stamp) : snprintf(kept, kn, "%s/%s cloud %d", dir, stamp, k);
+        if (w < 0 || w >= (int)kn) { rm_tree(stage); kept[0] = 0; errno = ENAMETOOLONG; return -1; }
+        if (!renamex_np(stage, kept, RENAME_EXCL)) break;
+        if (errno == EEXIST) continue;
+        int e = errno; rm_tree(stage); kept[0] = 0; errno = e; return -1;
+    }
+    prune_backups(save, "cloud", kept);
     return 0;
 }
 
@@ -387,9 +439,9 @@ static int cloud_file(const char *title, char *out, size_t n) { return cloud_pat
 // The platform's fetch, given at most `ms`: a download iCloud never finishes must not hold the game at its first save mount. One that comes too late is dropped.
 // Each fetch writes a file of its own (part: <local>.<pid>-<n>.part), renamed to `local` only by the caller that still waits for it: a fetch that came too late
 // removes its own file and nothing else, so it never writes over or removes what a later attempt fetched to the same `local` (the sender's out/cloud.dmsync)
-typedef struct { pthread_mutex_t mu; pthread_cond_t cv; int done, abandoned, result; char cloud[PATH_MAX], part[PATH_MAX + 32]; } fetch_job;
+typedef struct { pthread_mutex_t mu; pthread_cond_t cv; int done, abandoned, result, want_id; ss_cloud_id id; char cloud[PATH_MAX], part[PATH_MAX + 32]; } fetch_job;
 static void *fetch_thread(void *p) {
-    fetch_job *j = p; int r = front_save_sync_fetch(j->cloud, j->part);
+    fetch_job *j = p; int r = front_save_sync_fetch(j->cloud, j->part, j->want_id ? &j->id : NULL);
     pthread_mutex_lock(&j->mu); j->done = 1; j->result = r; int late = j->abandoned; pthread_cond_signal(&j->cv); pthread_mutex_unlock(&j->mu);
     if (late) { unlink(j->part); pthread_mutex_destroy(&j->mu); pthread_cond_destroy(&j->cv); free(j); }
     return NULL;
@@ -399,11 +451,13 @@ static void deadline(int ms, struct timespec *ts) {
     ts->tv_sec += ms / 1000; ts->tv_nsec += (long)(ms % 1000) * 1000000;
     if (ts->tv_nsec >= 1000000000) { ts->tv_sec++; ts->tv_nsec -= 1000000000; }
 }
-static int fetch_timed(const char *cloud, const char *local, int ms) {   // front_save_sync_fetch's answer, or -1 at the time limit (or with no thread to wait on)
+static int fetch_timed(const char *cloud, const char *local, int ms, ss_cloud_id *id) {   // front_save_sync_fetch's answer, or -1 at the time limit (or with no thread to wait on)
     static _Atomic unsigned seq;
+    if (id) memset(id, 0, sizeof *id);
     fetch_job *j = calloc(1, sizeof *j); pthread_t t;
     if (!j) return -1;
     pthread_mutex_init(&j->mu, NULL); pthread_cond_init(&j->cv, NULL);
+    j->want_id = id != NULL;
     snprintf(j->cloud, sizeof j->cloud, "%s", cloud); snprintf(j->part, sizeof j->part, "%s.%d-%u.part", local, (int)getpid(), atomic_fetch_add(&seq, 1));
     int e = pthread_create(&t, NULL, fetch_thread, j);
     if (e) { pthread_mutex_destroy(&j->mu); pthread_cond_destroy(&j->cv); free(j); SRED("no thread to fetch the cloud's save (error %d)", e); return -1; }   // not fetched on this thread: a download that never finishes would hold the game
@@ -417,6 +471,7 @@ static int fetch_timed(const char *cloud, const char *local, int ms) {   // fron
     if (mine) {
         if (r == 1 && rename(j->part, local)) { SRED("cannot put the cloud's save at %s (errno=%d)", local, errno); r = -1; }
         if (r != 1) unlink(j->part);   // what a fetch that failed left, if anything
+        if (id && (r == 0 || r == 1)) *id = j->id;
         pthread_mutex_destroy(&j->mu); pthread_cond_destroy(&j->cv); free(j);
     } else SLOG("the cloud's save did not come within %d s", ms / 1000);
     return r;
@@ -513,7 +568,7 @@ static int pull(const char *save, const char *bundle, ss_meta *r, char *kept, si
         j.had[i] = none ? HAD_NONE : h ? HAD_SAVE : HAD_EMPTY;
         if (j.had[i] == HAD_SAVE) { j.dev[i] = (uint64_t)st.st_dev; j.ino[i] = (uint64_t)st.st_ino; }
     }
-    if ((j.had[0] == HAD_SAVE || j.had[1] == HAD_SAVE) && backup_dir(save, "local", kept, kn, 0)) { e = errno; kept[0] = 0; rm_tree(tmp); errno = e; return -1; }
+    if ((j.had[0] == HAD_SAVE || j.had[1] == HAD_SAVE) && backup_dir(save, "local", kept, kn)) { e = errno; kept[0] = 0; rm_tree(tmp); errno = e; return -1; }
     snprintf(j.kept, sizeof j.kept, "%s", kept);
     if (journal_write(save, &j)) { e = errno; if (*kept) rmdir(kept); kept[0] = 0; rm_tree(tmp); errno = e; return -1; }   // nothing of this device's has moved
     for (int i = 0; i < 2; i++) {
@@ -542,8 +597,9 @@ undo:
 // not replaced: the next start decides between the two (ss_decide: the newer one, or the player's choice when a front end asks).
 // 1 = in step with the cloud, 0 = not: the cloud cannot be read or written now (the next Commit, a flush or the Mac launcher tries again), or it waits for the next start
 static int send_save(const char *save, const char *title, const char *cloud) {
-    char tmp[PATH_MAX], snap[PATH_MAX], packed[PATH_MAX], theirs[PATH_MAX], base[SS_HASH + 1], dir[PATH_MAX], kept[PATH_MAX], t[32];
-    ss_meta mine, other; int ok = 0, got;
+    char tmp[PATH_MAX], snap[PATH_MAX], packed[PATH_MAX], theirs[PATH_MAX], base[SS_HASH + 1], dir[PATH_MAX], kept[PATH_MAX], raw[PATH_MAX + 16], t[32];
+    ss_meta mine, other; ss_cloud_id observed = {0}; int ok = 0, got, damaged = 0, sr;
+    kept[0] = 0; raw[0] = 0;
     snprintf(tmp, sizeof tmp, "%s.sync-tmp/out", save); snprintf(snap, sizeof snap, "%s/s", tmp);
     snprintf(packed, sizeof packed, "%s/save.dmsync", tmp); snprintf(theirs, sizeof theirs, "%s/cloud.dmsync", tmp);
     if (rm_tree(tmp) || mkdirs(tmp)) { SRED("cannot make %s (errno=%d)", tmp, errno); goto done; }
@@ -557,16 +613,15 @@ static int send_save(const char *save, const char *title, const char *cloud) {
     if (ss_pack(snap, title, packed, &mine)) { SRED("packing %s failed (errno=%d)", save, errno); goto done; }
     read_base(save, base);
     if (!mine.files || !strcmp(mine.hash, base)) { ok = 1; goto done; }   // no save yet, or the one already in step
-    if ((got = fetch_timed(cloud, theirs, FETCH_MS)) < 0) { SLOG("the cloud's save %s cannot be read now; sending later", cloud); goto done; }
+    if ((got = fetch_timed(cloud, theirs, FETCH_MS, &observed)) < 0) { SLOG("the cloud's save %s cannot be read now; sending later", cloud); goto done; }
     if (!got && *base) {   // no save in the cloud, though this device synced one there: removed, or not listed yet (iCloud on a folder picked again); the next start decides
         static _Atomic int gone;
         if (!atomic_exchange(&gone, 1)) SLOG("not sent: the cloud has no save for this game, though this device synced one there (removed, or not listed yet); the next start decides");
         goto done;
     }
-    if (got && ss_read(theirs, NULL, &other)) {   // no save can be read from it, so no progress is lost: the file itself is kept, then replaced
-        char raw[PATH_MAX + 16];
-        if (backup_dir(save, "cloud", kept, sizeof kept, 1) || snprintf(raw, sizeof raw, "%s/save.dmsync", kept) >= (int)sizeof raw || rename(theirs, raw)) { SRED("cannot keep the cloud's damaged save before replacing it (errno=%d); not sent", errno); goto done; }
-        SRED("the cloud's save %s is damaged; this device's replaces it, and the damaged file is kept in %s", cloud, kept);
+    if (got && ss_read(theirs, NULL, &other)) {   // no save can be read from it, so no progress is lost: the file itself is kept before replacing (pruned only after replacement commits)
+        if (backup_dir(save, "cloud", kept, sizeof kept) || snprintf(raw, sizeof raw, "%s/save.dmsync", kept) >= (int)sizeof raw || rename(theirs, raw)) { SRED("cannot keep the cloud's damaged save before replacing it (errno=%d); not sent", errno); goto done; }
+        damaged = 1;
     }
     else if (got && !strcmp(other.hash, mine.hash)) { write_base(save, mine.hash); ok = 1; goto done; }
     else if (got && other.files && strcmp(other.hash, base)) {
@@ -576,7 +631,18 @@ static int send_save(const char *save, const char *title, const char *cloud) {
         goto done;
     }
     snprintf(dir, sizeof dir, "%s", cloud); *strrchr(dir, '/') = 0;
-    if (mkdirs(dir) || front_save_sync_store(packed, cloud) != 1) { SRED("sending to %s failed (errno=%d)", cloud, errno); goto done; }
+    sr = mkdirs(dir) ? SS_STORE_ERR : front_save_sync_store(packed, cloud, &observed);
+    if (sr != SS_STORE_OK) {
+        int err = errno;
+        if (damaged) { unlink(raw); rmdir(kept); }
+        if (sr == SS_STORE_STALE) SLOG("not sent: the cloud's save %s changed before this device's could replace it; the next start decides between the two", cloud);
+        else SRED("sending to %s failed (errno=%d)", cloud, err);
+        goto done;
+    }
+    if (damaged) {
+        prune_backups(save, "cloud", kept);
+        SRED("the cloud's save %s is damaged; this device's replaces it, and the damaged file is kept in %s", cloud, kept);
+    }
     write_base(save, mine.hash); ok = 1;
     when(mine.saved, t, sizeof t);
     SLOG("sent: %d files, saved %s, to %s", mine.files, t, cloud);
@@ -628,6 +694,7 @@ static int mount_once(const char *save, const char *title) {
         if (recover(save, &j)) { SRED("this device's save could not be put back (errno=%d): it is not mounted; what is not in %s is kept in %s, and the next start tries again", errno, save, *j.kept ? j.kept : "its backups"); return -1; }
         SLOG("this device's save is back as it was before that pull");
     }
+    clean_backup_staging(save);
     if (!cloud_file(title, cloud, sizeof cloud)) return 0;
     SLOG("on: %s", cloud);
     snprintf(tmp, sizeof tmp, "%s.sync-tmp", save); snprintf(theirs, sizeof theirs, "%s/in.dmsync", tmp);
@@ -635,7 +702,7 @@ static int mount_once(const char *save, const char *title) {
     if (ss_scan(save, &mine)) { SRED("this device's save %s cannot be read (errno=%d): off", save, errno); return 0; }
     read_base(save, base);
     choice_kind choice = read_choice(chosen);
-    int got = choice == CH_OFFLINE ? -1 : fetch_timed(cloud, theirs, FETCH_MS), both = 0, failed = 0, damaged = 0, pr;
+    int got = choice == CH_OFFLINE ? -1 : fetch_timed(cloud, theirs, FETCH_MS, NULL), both = 0, failed = 0, damaged = 0, pr;
     if (got > 0 && ss_read(theirs, NULL, &other)) { SRED("the cloud's save %s is damaged: playing on with this device's, which replaces it (the damaged file is kept)", cloud); got = 0; damaged = 1; }
     else if (got > 0 && strcasecmp(other.title, title)) { SRED("the cloud's save %s is %s's, not %s's: not used", cloud, other.title, title); got = -1; }
     if (got < 0) { SLOG("playing on with this device's save; it is not sent until it has been compared with the cloud's"); failed = 1; }
@@ -662,7 +729,7 @@ static int mount_once(const char *save, const char *title) {
         // Over a cloud save that changed since the last sync (the newer of two that both changed, or the player's choice): the start chose against it, so it is kept
         // first and counts as the one last synced; the sender replaces only that one (send_save), not a save another device sends meanwhile
         if (got > 0 && other.files && strcmp(other.hash, base)) {
-            if (backup_dir(save, "cloud", kept, sizeof kept, 1) || ss_read(theirs, kept, &other)) { SRED("cannot keep the cloud's save before replacing it (errno=%d): not sent", errno); failed = 1; break; }
+            if (backup_cloud_restore(save, theirs, &other, kept, sizeof kept)) { SRED("cannot keep the cloud's save before replacing it (errno=%d): not sent", errno); failed = 1; break; }
             write_base(save, other.hash);
         } else if (damaged && *base) {
             // The cloud's file is damaged: forget the old base so the sender replaces it even if this device's save has not changed since the last sync; a valid cloud save that appears meanwhile is not replaced
@@ -719,7 +786,7 @@ int save_sync_report(const char *save, const char *title, const char *folder, in
         snprintf(tmp, sizeof tmp, "%s.sync-tmp", dd);
         snprintf(theirs, sizeof theirs, "%s/report-%d-%d.dmsync", tmp, (int)getpid(), atomic_fetch_add(&seq, 1));
         if (!mkdirs(tmp)) {
-            got = fetch_timed(cloud, theirs, wait_ms > 0 ? wait_ms : FETCH_MS);
+            got = fetch_timed(cloud, theirs, wait_ms > 0 ? wait_ms : FETCH_MS, NULL);
             if (got > 0 && ss_read(theirs, NULL, &other)) { SRED("the cloud's save %s is damaged", cloud); got = 0; damaged = 1; memset(&other, 0, sizeof other); }   // the mount replaces it
             unlink(theirs); rmdir(tmp);
         }
@@ -768,28 +835,96 @@ int save_sync_after_exit(const char *save, const char *title) {   // save: DM_SA
     return !cloud_file(title, cloud, sizeof cloud) || send_save(dd, title, cloud);
 }
 
-// ---------- the platform's parts: these defaults are plain file copies, which the Mac's iCloud Drive takes (it downloads a file a read asks for) ----------
-__attribute__((weak)) int front_save_sync_fetch(const char *cloud, const char *local) {
-    int in = open(cloud, O_RDONLY); if (in < 0) return errno == ENOENT ? 0 : -1;
-    int out = open(local, O_WRONLY | O_CREAT | O_TRUNC, 0644); if (out < 0) { close(in); return -1; }
-    int r = copy_fd(in, out); close(in);
-    if (close(out)) r = -1;
-    if (r) unlink(local);
-    return r ? -1 : 1;
+// ---------- the platform's parts: POSIX primitives shared by the weak defaults and save_sync_apple.m's NSFileCoordinator accessors ----------
+static int placeholder_path(const char *cloud, char *out, size_t n) {
+    const char *slash = strrchr(cloud, '/');
+    if (slash) return snprintf(out, n, "%.*s/.%s.icloud", (int)(slash - cloud), cloud, slash + 1) < (int)n;
+    return snprintf(out, n, ".%s.icloud", cloud) < (int)n;
 }
 
-// Written beside the cloud file under a .nosync name (iCloud Drive does not upload those) and renamed over it: iCloud sees one whole new file
-__attribute__((weak)) int front_save_sync_store(const char *local, const char *cloud) {
-    char part[PATH_MAX]; snprintf(part, sizeof part, "%s.%d.nosync", cloud, (int)getpid());
-    int in = open(local, O_RDONLY); if (in < 0) return 0;
-    int out = open(part, O_WRONLY | O_CREAT | O_TRUNC, 0644); if (out < 0) { close(in); return 0; }
-    int r = copy_fd(in, out);
-    if (!r && fsync(out)) r = -1;
+int ss_fetch_copy(const char *cloud, const char *local, ss_cloud_id *id) {
+    if (id) memset(id, 0, sizeof *id);
+    int in = open(cloud, O_RDONLY);
+    if (in < 0) {
+        if (errno == ENOENT) {
+            char ph[PATH_MAX + 32]; struct stat phst;
+            if (placeholder_path(cloud, ph, sizeof ph) && !lstat(ph, &phst)) { errno = EAGAIN; return -1; }
+            return 0;
+        }
+        return -1;
+    }
+    struct stat st, st2;
+    if (id && (fstat(in, &st) || !S_ISREG(st.st_mode))) { int e = errno; close(in); errno = e ? e : EINVAL; return -1; }
+    int out = open(local, O_WRONLY | O_CREAT | O_TRUNC, 0644);
+    if (out < 0) { int e = errno; close(in); errno = e; return -1; }
+    int r = copy_fd(in, out), err = r ? errno : 0;
+    if (!r && id && (fstat(in, &st2) || st2.st_size != st.st_size || st2.st_mtimespec.tv_sec != st.st_mtimespec.tv_sec || st2.st_mtimespec.tv_nsec != st.st_mtimespec.tv_nsec)) {
+        r = -1; err = EAGAIN;
+    }
     close(in);
-    if (close(out)) r = -1;
-    if (!r && rename(part, cloud)) r = -1;
-    if (r) unlink(part);
-    return !r;
+    if (close(out) && !r) { r = -1; err = errno; }
+    if (r) { unlink(local); errno = err; return -1; }
+    if (id) {
+        id->present = 1;
+        id->dev = (uint64_t)st.st_dev; id->ino = (uint64_t)st.st_ino;
+        id->size = (int64_t)st.st_size;
+        id->mtime_sec = (int64_t)st.st_mtimespec.tv_sec; id->mtime_nsec = (int64_t)st.st_mtimespec.tv_nsec;
+    }
+    return 1;
 }
+
+// Written beside the cloud file under a .nosync name (iCloud Drive does not upload those), then conditionally renamed under the per-title directory lock so a competing save is never overwritten
+int ss_store_conditional(const char *local, const char *cloud, const ss_cloud_id *expected) {
+    static _Atomic unsigned seq;
+    char dir[PATH_MAX], part[PATH_MAX + 32], ph[PATH_MAX + 32];
+    if (!local || !cloud || !expected) { errno = EINVAL; return SS_STORE_ERR; }
+    const char *slash = strrchr(cloud, '/');
+    if (!slash) snprintf(dir, sizeof dir, ".");
+    else if (slash == cloud) snprintf(dir, sizeof dir, "/");
+    else if ((size_t)(slash - cloud) >= sizeof dir) { errno = ENAMETOOLONG; return SS_STORE_ERR; }
+    else snprintf(dir, sizeof dir, "%.*s", (int)(slash - cloud), cloud);
+    if (mkdirs(dir)) return SS_STORE_ERR;
+    if (snprintf(part, sizeof part, "%s.%d-%u.nosync", cloud, (int)getpid(), atomic_fetch_add(&seq, 1)) >= (int)sizeof part) { errno = ENAMETOOLONG; return SS_STORE_ERR; }
+    int in = open(local, O_RDONLY);
+    if (in < 0) return SS_STORE_ERR;
+    int out = open(part, O_WRONLY | O_CREAT | O_EXCL, 0644);
+    if (out < 0) { int e = errno; close(in); errno = e; return SS_STORE_ERR; }
+    int r = copy_fd(in, out), err = r ? errno : 0;
+    if (!r && fsync(out)) { r = -1; err = errno; }
+    close(in);
+    if (close(out) && !r) { r = -1; err = errno; }
+    if (r) { unlink(part); errno = err; return SS_STORE_ERR; }
+    int dirfd = open(dir, O_RDONLY | O_DIRECTORY);
+    if (dirfd < 0) { err = errno; unlink(part); errno = err; return SS_STORE_ERR; }
+    while (flock(dirfd, LOCK_EX) < 0) {
+        if (errno == EINTR) continue;
+        err = errno; close(dirfd); unlink(part); errno = err; return SS_STORE_ERR;
+    }
+    int res = SS_STORE_ERR;
+    struct stat cur;
+    if (!expected->present) {
+        if (placeholder_path(cloud, ph, sizeof ph) && !lstat(ph, &cur)) res = SS_STORE_STALE;
+        else if (!renamex_np(part, cloud, RENAME_EXCL)) res = SS_STORE_OK;
+        else if (errno == EEXIST) res = SS_STORE_STALE;
+        else err = errno;
+    } else {
+        if (lstat(cloud, &cur)) {
+            if (errno == ENOENT) res = SS_STORE_STALE;
+            else err = errno;
+        } else if (!S_ISREG(cur.st_mode) || (uint64_t)cur.st_dev != expected->dev || (uint64_t)cur.st_ino != expected->ino ||
+                   (int64_t)cur.st_size != expected->size || (int64_t)cur.st_mtimespec.tv_sec != expected->mtime_sec ||
+                   (int64_t)cur.st_mtimespec.tv_nsec != expected->mtime_nsec) {
+            res = SS_STORE_STALE;
+        } else if (!rename(part, cloud)) res = SS_STORE_OK;
+        else err = errno;
+    }
+    close(dirfd);
+    if (res != SS_STORE_OK) unlink(part);
+    if (res == SS_STORE_ERR) errno = err;
+    return res;
+}
+
+__attribute__((weak)) int front_save_sync_fetch(const char *cloud, const char *local, ss_cloud_id *id) { return ss_fetch_copy(cloud, local, id); }
+__attribute__((weak)) int front_save_sync_store(const char *local, const char *cloud, const ss_cloud_id *expected) { return ss_store_conditional(local, cloud, expected); }
 
 __attribute__((weak)) int dm_fs_clone_committed(const char *dir, const char *to) { return clonefile(dir, to, 0) ? -1 : 0; }

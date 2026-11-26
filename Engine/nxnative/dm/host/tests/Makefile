@@ -27,6 +27,7 @@ run: $(B)/t_mii $(B)/t_net_eventfd $(B)/t_language $(B)/t_motion $(B)/t_heap_siz
 	TMPDIR="$(abspath $(B))" $(B)/t_mii_sysdata $(QUIET)
 	TMPDIR="$(abspath $(B))" $(B)/t_save_sync $(QUIET)
 	TMPDIR="$(abspath $(B))" $(B)/t_save_sync_metadata $(QUIET)
+	TMPDIR="$(abspath $(B))" $(B)/t_save_sync_apple $(QUIET)
 	$(B)/t_audio
 	$(B)/t_output_stream
 	$(B)/t_mii
@@ -84,12 +85,15 @@ run: $(B)/t_mii $(B)/t_net_eventfd $(B)/t_language $(B)/t_motion $(B)/t_heap_siz
 	TMPDIR="$(abspath $(B))" $(B)/t_hid
 	$(B)/t_pad_hid
 	$(B)/t_pad_gip
+	$(B)/t_pad_xusb
 	$(B)/t_pad_hid_mac
+	$(B)/t_pad_gip_mac
 	$(B)/t_pad_pro
 	$(B)/t_switch2
 	$(B)/t_haptics
 	$(B)/t_haptics_apple
 	$(B)/t_front_role
+	$(B)/t_front_present
 	TMPDIR="$(abspath $(B))" $(B)/t_cheats $(QUIET)
 	$(B)/t_nro
 	$(B)/t_symbols
@@ -197,15 +201,18 @@ $(B)/t_mii_sysdata: t_mii_sysdata.c ../hle_fs.c ../hle_account_users.c ../accoun
 	$(CLANG) -O1 -Wall -Wno-unused-function -I.. $(GINC) -o $@ t_mii_sysdata.c ../hle_bigstack.c ../save_sync.c ../hle_account_users.c -lz
 $(B)/t_fs_case: t_fs_case.c ../hle_fs.c ../hle_account_users.c ../account_users.h ../save_sync.c ../save_sync.h ../hle_bigstack.c ../hle.h ../dm.h $(GAME_H) | $(B)
 	$(CLANG) -O1 -Wno-unused-function -I.. $(GINC) -o $@ t_fs_case.c ../hle_bigstack.c ../save_sync.c ../hle_account_users.c
-run: $(B)/t_save_sync $(B)/t_save_sync_metadata
+run: $(B)/t_save_sync $(B)/t_save_sync_metadata $(B)/t_save_sync_apple
 $(B)/t_save_sync: t_save_sync.c t_fs_stub.c ../hle_fs.c ../hle_account_users.c ../account_users.h ../save_sync.c ../save_sync.h ../hle_bigstack.c ../hle.h ../dm.h $(GAME_H) | $(B)
 	$(CLANG) -O1 -Wall -Wno-unused-function -I.. $(GINC) -o $@ t_save_sync.c t_fs_stub.c ../hle_bigstack.c ../save_sync.c ../hle_account_users.c
 $(B)/t_save_sync_metadata: t_save_sync_metadata.c ../save_sync.c ../save_sync.h | $(B)
 	$(CLANG) -O1 -Wall -Wno-unused-function -I.. -o $@ t_save_sync_metadata.c
+$(B)/t_save_sync_apple: t_save_sync_apple.m ../save_sync.c ../save_sync_apple.m ../save_sync.h | $(B)
+	$(CLANG) -O1 -fobjc-arc -Wall -Werror -Wno-unused-function -I.. -o $@ t_save_sync_apple.m ../save_sync.c ../save_sync_apple.m -framework Foundation
 .PHONY: save-sync
-save-sync: $(B)/t_save_sync $(B)/t_save_sync_metadata
+save-sync: $(B)/t_save_sync $(B)/t_save_sync_metadata $(B)/t_save_sync_apple
 	TMPDIR="$(abspath $(B))" $(B)/t_save_sync $(QUIET)
 	TMPDIR="$(abspath $(B))" $(B)/t_save_sync_metadata $(QUIET)
+	TMPDIR="$(abspath $(B))" $(B)/t_save_sync_apple $(QUIET)
 AUDIO_INPUT_STUB = ../audio_input.c audio_input_platform_stub.c
 AUDIO_INPUT_DEPS = $(AUDIO_INPUT_STUB) ../audio_input.h
 $(B)/t_audio: t_audio.c ../hle_audio.c $(AUDIO_INPUT_DEPS) ../hle_bigstack.c ../hle.h ../dm.h $(GAME_H) | $(B)
@@ -358,6 +365,10 @@ $(B)/t_hid_tsan: t_hid.c ../hle_hid.c ../motion_fusion.h ../hle_haptics.c ../hle
 run: $(B)/t_front_role
 $(B)/t_front_role: t_front_role.c ../front_role.h | $(B)
 	$(CLANG) -O1 -g -Wall -Werror -I.. -o $@ t_front_role.c
+# Mac presentation layer opacity policy (mirrored fullscreen workaround, issue #1821).
+run: $(B)/t_front_present
+$(B)/t_front_present: t_front_present.c ../front_mac_present.h | $(B)
+	$(CLANG) -O1 -g -Wall -Werror -I.. -o $@ t_front_present.c
 $(B)/t_haptics: t_haptics.c ../hle_haptics.c ../hle_haptics.h ../dm_input.h | $(B)
 	$(CLANG) -O1 -g -Wall -Werror -I.. -o $@ t_haptics.c ../hle_haptics.c
 $(B)/t_haptics_apple: t_haptics_apple.m ../haptics_apple.m ../haptics_apple.h ../hle_haptics.c ../hle_haptics.h ../pad_jc1.h ../pad_pro.h | $(B)
@@ -547,9 +558,13 @@ tsan-threads-run: $(addprefix $(B)/,$(TSAN_T))
 	DM_QOS_MAP=1 $(B)/t_notify_sched --all-peers
 $(B)/t_pad_hid: t_pad_hid.c ../pad_hid.h ../dm_input.h | $(B)
 	$(CLANG) -O1 -g -Wall -Werror -Wno-unused-function -fsanitize=address,undefined -I.. -o $@ t_pad_hid.c
-run: $(B)/t_pad_gip
+run: $(B)/t_pad_gip $(B)/t_pad_xusb $(B)/t_pad_gip_mac
 $(B)/t_pad_gip: t_pad_gip.c ../pad_gip.h ../pad_hid.h ../dm_input.h | $(B)
 	$(CLANG) -O1 -g -Wall -Werror -Wno-unused-function -fsanitize=address,undefined -I.. -o $@ t_pad_gip.c
+$(B)/t_pad_xusb: t_pad_xusb.c ../pad_xusb.h ../pad_hid.h ../dm_input.h | $(B)
+	$(CLANG) -O1 -g -Wall -Werror -Wno-unused-function -fsanitize=address,undefined -I.. -o $@ t_pad_xusb.c
+$(B)/t_pad_gip_mac: t_pad_gip_mac.m ../pad_gip_mac.h ../pad_gip.h ../pad_xusb.h ../pad_hid.h ../pad_slots.h ../dm_input.h | $(B)
+	$(CLANG) -O1 -g -fobjc-arc -Wall -Werror -Wno-unused-function -fsanitize=address,undefined -I.. -o $@ t_pad_gip_mac.m -framework Foundation -framework IOKit -framework IOUSBHost
 run: $(B)/t_pad_pro
 $(B)/t_pad_pro: t_pad_pro.c ../pad_pro.h ../dm_input.h | $(B)
 	$(CLANG) -O1 -g -Wall -Werror -Wno-unused-function -fsanitize=address,undefined -I.. -o $@ t_pad_pro.c
