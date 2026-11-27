@@ -29,6 +29,7 @@ class Progress:
 def event(logs, name):
     with (logs.parent/'events').open('a') as f: f.write(name+'\\n')
 def extract(nx, keys, ex, version, base, update, extra, logs, gp, app):
+    assert extra is None and gp.id == f'{app:016X}'
     event(logs,'unpack')
     d=ex/version;(d/'ExeFS').mkdir(parents=True);(d/'RomFS').mkdir()
     code,asset=(update or base).read_text().split('|')
@@ -166,6 +167,18 @@ class IncrementalBuildTests(unittest.TestCase):
     def events(self): return (self.work/'events').read_text().splitlines()
     def delta(self, change):
         before=self.events();change();self.build();return self.events()[len(before):]
+
+    def test_container_build_uses_current_engine_extract_tail(self):
+        script = self.source / 'scripts/build_ipa_from_nsp.py'
+        script.write_text(SCRIPT.replace(
+            "def extract(nx, keys, ex, version, base, update, extra, logs, gp, app):\n"
+            "    assert extra is None and gp.id == f'{app:016X}'",
+            "def extract(nx, keys, ex, version, base, update, logs, app, repo):\n"
+            "    assert app == 0x0100000000010000 and repo == logs.parent / 'engine'"))
+        result = self.build()
+        self.assertEqual(self.events().count('unpack'), 1)
+        self.assertEqual((Path(result['path']) / 'romfs/marker').read_text(), 'asset')
+        self.assertEqual(self.delta(lambda: None), [])
 
     def test_controller_edit_updates_only_host_and_preserves_workspace(self):
         first=self.build();workspace=self.work
