@@ -368,9 +368,14 @@ def build(c,target='macos'):
         needed=max(sum(x['size'] for x in sources),g.get('sourceExpandedSize',0))*2+(10 if target=='ios' else 3)*2**30
         if shutil.disk_usage(c.library).free<needed and not st.saved: raise Failure(f'准备游戏需要约 {needed/2**30:.0f} GB 可用空间。')
         dirs={}
-        # Recent upstream requires the selected application for multi-app
-        # containers; older development engines keep the nine-argument API.
-        extraction={'app':int(g['id'],16)} if 'app' in signature(up.extract).parameters else {}
+        # Engines differ in extract()'s tail: 73150dd+ is
+        # (nx, keys, ex, name, base, upd, logs, app, repo); earlier revisions
+        # keep (nx, keys, ex, name, base, upd, dlc, logs, g) plus app=.
+        # Tell them apart by parameter name and build the tail once.
+        fields=list(signature(up.extract).parameters)
+        modern=len(fields)>6 and fields[6]=='logs' and 'repo' in fields
+        extraction={} if modern else ({'app':int(g['id'],16)} if 'app' in fields else {})
+        tail=[logs,int(g['id'],16),repo] if modern else [None,logs,gp]
         for index,ver in enumerate(versions):
             upd=next((c.library/x['path'] for x in g['packages'] if x['type']=='update' and f"v{x['version']}"==ver),None)
             d=root/'extract'/ver; dirs[ver]=d
@@ -380,7 +385,7 @@ def build(c,target='macos'):
                 import nup
                 st.run('解包与合并 '+ver,[d],lambda d=d,ver=ver:nup.extract(c,c.library/sources[0]['path'],int(ver[1:]),d),milestone=f'unpack-{index}')
             else:
-                st.run('解包与合并 '+ver,[d],lambda ver=ver,upd=upd: up.extract(c.nx(),c.keys,root/'extract',ver,c.library/base['path'],upd,None,logs,gp,**extraction),milestone=f'unpack-{index}')
+                st.run('解包与合并 '+ver,[d],lambda ver=ver,upd=upd: up.extract(c.nx(),c.keys,root/'extract',ver,c.library/base['path'],upd,*tail,**extraction),milestone=f'unpack-{index}')
         if own:
             import derived
             gp,sources_info=derived.prepare_profile(c,st,up,gp,root,repo,env,dirs[strategy['version']],strategy['version'])
