@@ -90,6 +90,14 @@
 - **Fix:** the pattern takes the variant, and an `sdk` built for the Switch 2 (`spec: Ounce`, as `dm_sdk_ounce` reads it) gets the 9 GB pool every Switch 2 profile has. Open: only the pool changes; a game with system resource keeps the 5 GB block (Star Fox's profile has 21 GB with a 16 GB alias region), so a provisional profile may still not fit and needs the bring-up.
 - **Found on:** Star Fox and Kirby Air Riders (`040077201BE50000`; no profile), read from their NUP and extraction; first reported with [Fire Emblem Fortune's Weave](../../dm/games/04007EF01F8AE000/README.md).
 
+### Extracted Control NCA metadata for dump folders
+
+- **Symptom:** a game built from a dump folder is labelled after the folder (such as `dump`), has display version `?`, no supported language list and no app icon, even when the dump holds an extracted Control NCA (`control/control.nacp`, `control/icon_<Language>.dat`), or an Ounce (`0400`) program picks the Switch 1 `control/` identity instead of its `control/Acd_1/` Switch 2 Edition identity.
+- **Cause:** `pack_dump.py` and `survey_dump` ignored extracted Control NCA directories and never mapped them to `control.nacp` and `icon.jpg` beside `ExeFS` and `RomFS.img` as `nx_extract` does for NSPs, and `build_ipa_from_nsp.py` read `app_name` only from `base / 'control.nacp'`.
+- **Fix:** `pack_dump.copy_control` maps the selected version folder's `control/control.nacp` and localized `control/icon_<Language>.dat` (in `nacp.LANGUAGES` order—American English, British English, Japanese, …—matching `nx_extract`, with sorted `icon_*.dat` as catch-all) into `out/control.nacp` and `out/icon.jpg`, falling back to loose `control.nacp` / `icon.jpg` in that same version folder. When the version's `exefs/main.npdm` is an Ounce (`0400`) program and `control/Acd_1/` is present, `control/Acd_1/` is preferred over `control/`. Missing or moved sources remove stale outputs; nothing walks above the chosen version directory. Both `pack_version` and `survey_dump` call `copy_control`, and `build_ipa_from_nsp.py` prefers `game / 'control.nacp'` over `base / 'control.nacp'` for `app_name`. Note: `pack_dump.scan` still requires program index 0 (`app & 0xFFF == 0`), so multi-program / Program 1 folder dumps remain separate work.
+- **Check:** `dm/tools/tests/test_nsp_dump.py` covers Switch 1 vs Ounce `Acd_1` selection, `nacp.LANGUAGES` icon priority (`BritishEnglish` over `BrazilianPortuguese`), partial `Acd_1` fallback, loose fallback, stale removal without parent-folder fallback, read-only overwrite, real `0x4000`-byte NACP parsing through `pack_version`/`survey_dump`, and update-over-base `app_name` selection.
+- **Found on:** [Super Mario Bros. Wonder – Nintendo Switch 2 Edition + Meetup in Bellabel Park](../../dm/games/040015100B514001/README.md) (`040015100B514001`, v327680; [PR #1562](https://github.com/seedds/nxnative/pull/1562)), where `control/` held the Switch 1 title and `control/Acd_1/` held the Switch 2 Edition title and icon.
+
 ## Build tools
 
 ### Stopping a build left its tools running
@@ -169,6 +177,13 @@
 - **Cause:** `dmsh_build.py` wrote `DMSH_PROGRESS` at most every half second during `cache check` and `compiling` without flushing the final count, emitted no progress for mesh libraries, `publish_library` (40–49 s for Ocarina of Time's 10.7 GB Mac image on an M3 Max; two images on iOS), or `c1_guard.py` and `cb_extent.py` (6.5–19 s with a warm memo, ~100–106 s cold), and unlinked the progress file before running the table tools. `ShaderWatch` also mapped every step other than `cache check` back to `compiling`, hiding `compiling RT library`.
 - **Fix:** `dmsh_build.py` now flushes the final count of `cache check` and `compiling`, flushes immediately on every step change, reports `compiling mesh libraries` across `_mesh`, passes an `on_progress` callback through `publish_library` to `shader_lib.write` for `writing the library image` (or `writing the Mac library image` and `writing the iOS library image` on dual-image builds, with file counts and bytes written), and reports `c1 guard` and `uniform read extents` before unlinking `DMSH_PROGRESS` at exit. `ShaderWatch` reads `step`, counts, unit and formatted bytes directly from `DMSH_PROGRESS`.
 - **Found on:** [Ocarina of Time](../../dm/games/0400486024DEC000/README.md#found-on-this-game) v131072 on an M3 Max ([PR #2684](https://github.com/seedds/nxnative/pull/2684)). Checked in `dm/tools/tests/test_shader_lib.py` (`test_write_reports_progress`), `dm/tools/tests/test_nsp_mac.py` (`test_shader_watch_follows_all_phases`) and `dm/tools/tests/test_shader_toolchain_cache.py` (`BuildProgress`).
+
+### A comma in the build path stops the shader split
+
+- **Symptom:** `shader_split.py` stops with `FileNotFoundError` naming only the part of the NSP folder before a comma.
+- **Cause:** the NSP script joined the RomFS, ExeFS and DLC paths with commas, and the splitter used the same character to separate the paths for each game version.
+- **Fix:** the NSP script sends each path list as a JSON array. The direct splitter CLI still accepts its original comma-separated arguments. A synthetic base, update and DLC under a path with a comma verify that all three shader sources reach the split.
+- **Found on:** [Pokémon: Let's Go, Pikachu!](../../dm/games/010003F003A34000/README.md#found-on-this-game) 1.0.2 (`010003F003A34000`).
 
 ### The split shader tables differ from a game profile's
 
@@ -312,6 +327,13 @@
 - **Fix:** keep only complete lines at the two read boundaries before redaction, using the byte before the tail to distinguish a complete first line from a fragment. The omitted-byte count includes the discarded fragments; reading stays bounded. Files within the limit and a complete final line without a newline are unchanged.
 - **Found on:** synthetic logs in `dm/tools/tests/test_bug_report.py`, including a key value surviving in the final zip on the old code. No game files or real keys are needed; this is a diagnostic collector finding, not a game-runtime failure.
 
+### A bug report for an NSP folder left out the Mac app packed there
+
+- **Symptom:** `scripts/bug_report.py <NSP folder>` (or its `<title ID>_build`, or `<title ID>`) writes `unknown (not recorded by the build)` (or `target`) under both "nxnative commit" and "Shader chain version" in `report.md`, although the run log records `[dm] build: commit …, shader chain …` or the Mac app the NSP script packed into that folder records both (`DMCommit`, `DMChain`); given the `.app` itself, the script names them, while data-bundle Mac apps also omitted `Contents/Resources/msl/b-<chain>.img` from the shader folder list.
+- **Cause:** `collect` read `DMCommit`/`DMChain` only from an explicit `.app` target's `Info.plist`: it neither parsed the host's startup `build:` line from the collected run log (`dm/host/main.c`) nor checked the `<game name>.app` that `build_ipa_from_nsp.py --platform mac-app` writes directly into the NSP folder. Separately, `shader_dirs` skipped every symlink, which excluded data-bundle Mac apps' `Contents/Resources/msl` link into `Contents/PlugIns/ShaderLibraries.bundle`.
+- **Fix:** for non-`.app` targets, `collect` first reads `[dm] build: commit …, shader chain …` from the collected run log (`--ios-log` when given, never mixing Mac logs or a sibling Mac app into an iPhone report; otherwise the Mac app log, falling back to `.prev.log` only when `.log` is absent). When no run log has a `build:` line for an NSP folder (and `--ios-log` is not given), `resolve` lists the apps directly in the NSP folder whose `DMTitleID` matches the build's title ID, and with exactly one, `collect` takes its `DMCommit` and `DMChain` (or its sole `b-<chain>` library, stripping `.img`), names the app beside each value, lists its library before the build's shader folders, and keeps the build's logs. With none or several, both stay unknown and the report's file list says why: a folder never guesses which app ran. Only the stamps are taken: the name, version, settings and `env.txt` of a sibling app stay out, and "How it was built and run" is left to fill in. `shader_dirs` follows a `Contents/Resources/msl` symlink only when it resolves inside the `.app` bundle.
+- **Found on:** the NSP folder of [The Legend of Zelda: Ocarina of Time](../../dm/games/0400486024DEC000/README.md): commit and chain unknown before; after, `786715256f37` and `ded41f8d62ed` from its app, the values the same script reports for the app, with the same 18 files in the zip. `dm/tools/tests/test_bug_report.py` covers one app, two apps, an app of another title, runtime Mac and iPhone startup logs, and data-bundle `msl` symlinks.
+
 ## IPA archives
 
 ### AltServer cannot install a file of 2 GiB or more
@@ -327,6 +349,13 @@
 - **Cause:** `pack_ipa.py` wrote the uncompressed size collected before reading. Its streaming check compared the output size only for stored files, so a compressible file that grew or shrank still published an archive with the old size.
 - **Fix:** count uncompressed bytes as they are read and compare them with the listed size before completing either streamed method. A mismatch stops the pack and removes the partial archive, preserving the previous IPA and its reuse index. Regression tests cover growth and shrinkage with both deflate and store.
 - **Found on:** synthetic IPA inputs while reviewing [PR #279](https://github.com/seedds/nxnative/pull/279); no game files required.
+
+### An empty icon file gives the app a blank icon and the log names it as the icon
+
+- **Symptom:** the build logs `app icon: <file>` and succeeds, but the app's home-screen icon is blank.
+- **Cause:** `build_ipa.sh` scales the icon (`DM_ICON`, `--icon` / `--fallback-icon` in the NSP script, or the extracted `icon.jpg`) to the asset catalog's `icon.png` with `sips`. `sips` skips an empty file with `Warning: … not a valid file - skipping`, exits 0 and writes nothing, so the catalog named a PNG that does not exist and `DM_APPICON` was set. `actool` then compiles that catalog with exit 0 and no message, and its partial Info.plist has no icon keys. A text file named `.jpg` or `.png` and an unreadable file already stopped the build (`sips` exits 13), naming the file.
+- **Fix:** `build_ipa.sh` also checks that the PNG was written and is not empty, and in every case stops with `the icon <file> is not an image sips can read (empty, unreadable or not an image): give a JPEG or PNG`. `dm/ios/tests/test_app_icon.py` runs the icon step alone: an image becomes a 1024x1024 icon, no file leaves the icon blank, an empty file or a text file named `.jpg` / `.png` stops naming the file.
+- **Found on:** reading the icon step; reproduced with a zero-byte `DM_ICON` (and `actool` run on the resulting catalog), no game files required. Applies to every game's iPhone build.
 
 ## RomFS images
 
@@ -630,6 +659,14 @@
 - **Fix:** `finish` sets the window's `animationBehavior` to `.none` before the order-out, and `dm_mac_launcher` calls `CATransaction.flush()` after `run()` returns, before it hands back to `launcher.c`. Neither alone was enough. Check: a copy of the window with a timed Play and a `CGWindowListCopyWindowInfo` probe while the thread then blocks; the window was still listed 2 and 4 s after Play before the fix, and gone 3 times in 3 after it. `test_launcher_storage.py` and `test_nsp_mac_app.py` pass.
 - **Found on:** the Mac app of [Breath of the Wild](../../dm/games/01007EF00011E000/README.md); applies to every Mac app.
 
+### A reused Mac app reports an earlier source commit
+
+- **Symptom:** packing after a checkout-only change reports `reused (inputs unchanged)`, but `Info.plist` still names the earlier `DMCommit`; build-provenance checks reject the app.
+- **Cause:** `pack_app.py` included selected runtime files, options and tools in its reuse key, but not the checkout identity it writes into the bundle. Identical runtime files can belong to different commits, or to clean, dirty and non-Git source states.
+- **Fix:** read source identity once, include it in the reuse key and use that same snapshot for `DMCommit`. An unchanged identity still reuses the complete app. A changed identity repacks and signs the outer bundle through the existing atomic replacement path while reusing unchanged signed data bundles. This does not prove that the source tree stayed unchanged throughout packaging.
+- **Check:** `PackReuse.test_source_identity_invalidates_reuse_and_matches_metadata` calls the real pack entry point with synthetic files and fake external compiler/signing tools. Changed commit, dirty state and missing Git provenance must repack with matching metadata (reusing the signed data bundles); each unchanged state must reuse without compiling or signing. The old key fails this regression.
+- **Found on:** local [Ocarina of Time](../../dm/games/0400486024DEC000/README.md) candidate packaging after a documentation-only commit ([PR #2232](https://github.com/seedds/nxnative/pull/2232)). No game-data or rendering change is needed to reproduce it.
+
 ## External drives
 
 ### A game folder on an exFAT drive reads one update as two, or fails to remove a folder
@@ -808,6 +845,14 @@
 - **Fix:** a damaged copy is keyed as the same extraction: its RomFS by its files' times (`('stat', …)`, which an extraction writes again; inside `RomFS.img`, the image's) and by `check_formats`' list of damaged files (`RomFS.img.formats`). A build of the same extraction reuses the split and the shaders; a new extraction (a repaired copy, other options: `extraction_key`) or another damage list splits again. The Vulkan and OpenGL steps key a damaged copy by times as well (their `provisional` keying). An undamaged build's key is as before, and damaged and undamaged builds never take each other's split.
 - **Found on:** [Ocarina of Time](../../dm/games/0400486024DEC000/README.md#found-on-this-game), v131072 built with `--allow-damaged`, which a contributor kept on after replacing a NUP with three damaged textures ([A damaged file in a NUP or a dump has no hash to fail](#a-damaged-file-in-a-nup-or-a-dump-has-no-hash-to-fail)): the option alone, with no file damaged, took this path. `dm/tools/tests/test_nsp_incremental.py` (`SplitShaders.test_damaged_reuses_only_the_same_extraction`).
 
+### Build anyway stops on an unreadable archive despite matching shader tables
+
+- **Symptom:** a registered game's extraction succeeds with `--allow-damaged`, but shader splitting stops with `file(s) could not be read; the profile's tables hold every file's shaders`, even when every generated shader table matches its registered table.
+- **Cause:** the shader step rejected unreadable archive data before comparing the tables, independently of the explicit extraction override. A corrupt non-shader resource can produce that warning without losing any required shader.
+- **Fix:** allow the explicit override past the unreadable-file guard, retaining the warning and all registered shader-table comparisons. Missing or changed shaders still stop the build, and a normal build still rejects unreadable files. This does not repair corrupted game assets.
+- **Found on:** [Xenoblade Chronicles 3](../../dm/games/010074F013262000/README.md), 2.2.1: `bf3.ard` failed its NCA integrity check and one zlib stream failed decompression, while all 27,055 shader keys and all generated profile tables matched.
+- **Check:** `test_nsp_incremental.py` covers matching tables, reuse, a mismatched table under the override and refusal without the override.
+
 ### An update's offline HTML pages reported as a damaged NSP
 
 - **Symptom:** the NSP script stops at the offline HTML pages (`logs/extract_html_<version>.log`) with `[RED] the NSP is damaged: <n> files fail the NCA's hash check` and a list under `/html-document/`, although the program extracted cleanly and the NSZ tool verified every NCA of the update.
@@ -855,6 +900,14 @@
 - **Cause:** the base game's HtmlDocument NCA can be sparse too (16 KB, beside the sparse Program NCA). `--html` reads the update's HtmlDocument NCAs, each over a base one when it is a patch, and then every base HtmlDocument NCA on its own; a sparse one read alone fails the hash check while its tables open.
 - **Fix:** `dm/tools/nx_extract/Program.cs` reads no sparse base HtmlDocument NCA on its own (`a sparse HtmlDocument NCA of the base game (… bytes): read only through the update's patch, not alone`), as Horizon mounts it only through its patch.
 - **Found on:** [Minecraft Dungeons II](../../dm/games/0100A7C01B792000/README.md), base v0 with update v131072: the update's patch (`accessible-urls`) and its full legal information NCA are read, the base's legal information NCA too.
+
+### Offline pages of a sparse base game are incomplete without its update patch
+
+- **Symptom:** `nx_extract --html` on a base NSP with no update (or an update that does not patch its sparse Manual NCA) prints `a sparse HtmlDocument NCA of the base game (16384 bytes): read only through the update's patch, not alone`, writes only the non-sparse Manual NCAs (`1 HtmlDocument NCAs`) and exits 0, although the sparse HtmlDocument pages are missing.
+- **Cause:** the sparse-base skip above skipped every sparse base Manual NCA unconditionally without checking whether an update patch actually read through that base NCA. Without an update, or when the update only ships an unrelated full Manual NCA (such as LegalInformation) or patches a different base NCA, nothing supplied the sparse NCA's pages.
+- **Fix:** `dm/tools/nx_extract/Program.cs` (`ExtractHtml`) records the exact base Manual NCAs that an update patch successfully read through (`patched`). A sparse base Manual NCA is skipped only when it is in `patched`; otherwise `--html` removes any partial `html<n>` folders it created, prints `[RED] a sparse HtmlDocument NCA of the base game (… bytes) has no update patch to read it through: its pages are missing; pack the base game with its update NSP`, and stops with exit code 4 (the code a sparse base Program NCA without its update already returns). Non-sparse bases and updates whose patch matches the sparse base read identically to before.
+- **Check:** `dm/tools/tests/test_pfs0_storage.py` (`CheckSparseHtmlExtraction` in `Pfs0StorageTests.cs`) covers base-only sparse extraction (including end-to-end `--html` CLI on a synthetic NSP), an unrelated full update Manual NCA, a patch matching a different base NCA, a failed patch alongside a full update NCA, a second unpatched sparse base, a matching patch (3 directories, exit 0), and a non-sparse base alone.
+- **Found on:** [Minecraft Dungeons II](../../dm/games/0100A7C01B792000/README.md), base v0 without its update ([PR #1769](https://github.com/seedds/nxnative/pull/1769)): base-only extraction previously wrote 14 files in one directory and exited 0, against 29 files in three directories with update v131072.
 
 ### Unreal 4.27 shaders with 8-byte hashes, an untagged record or a version 12 pak
 

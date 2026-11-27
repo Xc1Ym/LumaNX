@@ -166,6 +166,7 @@ Mac regression on the M4 Pro with macOS 27.2.1 and Xcode 27.2, 2026-11-19. Both 
 
 ## Found on this game
 
+- [A game that changes its present interval every frame filled the log](../../../docs/reference/frame-rate.md#a-game-that-changes-its-present-interval-every-frame-filled-the-log): 11,614 interval changes in a 7-minute 1.8.0 iPhone race before the host frame step covered 1.8.0.
 - [A lone acquire thread kept its time-constraint policy through a long CPU burst](../../../docs/reference/frame-rate.md#a-lone-acquire-thread-kept-its-time-constraint-policy-through-a-long-cpu-burst): the freezes of up to about a minute at the end of a race ([GitHub issue #1859](https://github.com/seedds/nxnative/issues/1859)). Fixed from its logs and a synthetic measurement, not run on the game; the 12 to 16 s burst itself stays open.
 - [A residency commit stays blocked in the iPhone kernel](../../../docs/reference/rendering.md#a-residency-commit-stays-blocked-in-the-iphone-kernel) (open).
 - [A timed archive write stalls active presentation](../../../docs/reference/rendering.md#a-timed-archive-write-stalls-active-presentation).
@@ -198,6 +199,7 @@ Mac regression on the M4 Pro with macOS 27.2.1 and Xcode 27.2, 2026-11-19. Both 
 - [Comparisons with .FTZ](../../../docs/reference/shaders.md#comparisons-with-ftz)
 - [Variable rate shading ignored](../../../docs/reference/rendering.md#variable-rate-shading-ignored)
 - [Image views of the type a shader declares](../../../docs/reference/rendering.md#image-views-of-the-type-a-shader-declares) (the dark box around each kart's shadow, issue #1648)
+- [Uncompressed alias bookkeeping walked every writer on each registration change](../../../docs/reference/rendering.md#uncompressed-alias-bookkeeping-walked-every-writer-on-each-registration-change) (submit CPU after PR #3318: the game registers its render targets anew each frame, with IDs past 65,536)
 - [A haptic engine that stops under a call raises, and ended the app](../../../docs/reference/services.md#a-haptic-engine-that-stops-under-a-call-raises-and-ended-the-app) (the iPhone crash after about 85 s of a race)
 - [A DualShock 4 that connects after the first stays on Core Haptics](../../../docs/reference/services.md#a-dualshock-4-that-connects-after-the-first-stays-on-core-haptics)
 - [Identical controllers that GameController lists as one](../../../docs/reference/services.md#identical-controllers-that-gamecontroller-lists-as-one) (two Pro Controllers over USB, split-screen races)

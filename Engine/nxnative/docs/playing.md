@@ -30,6 +30,8 @@ Joy-Con 2 and Pro Controller 2 gyro come over Bluetooth LE ([Switch 2 controller
 
 **Shaking.** Shake the iPhone to shake the controller, in games that read its motion: Super Mario Odyssey's motion moves (such as the cap throw on a shake) need it, and Odyssey only takes them in its default docked mode. A light bump does not count; a sharp flick of the phone does.
 
+**Controllers without a gyro (Mac).** In the game window, choose **Controls → Right Stick Motion** or press **⌘⇧G**. With the mode on, player 1's right stick turns the virtual controller. A small push turns it slowly, a full push can flip a maze over, and releasing the stick holds the angle. Turn the mode off to use the right stick for the camera again. The mode is off at launch unless `DM_STICK_MOTION=1` is set.
+
 ## Game language
 
 English by default. Pick another when packing with `--language` (`-l`), by code or by name: `-l ja`, `-l zh-Hans`, `-l French` (`LANGUAGE` in Spyder). It must be one the game has; the script prints the game's languages and stops on one it lacks. To change it without rebuilding, pick another on the settings screen.
@@ -59,6 +61,8 @@ A wired Xbox One or Xbox 360 controller from another maker than Microsoft, such 
 
 Two identical controllers that Apple's controller support lists as one, such as two Pro Controllers over USB, are each a player of their own: after 3 seconds the log says `GameController lists 1 of 2`, and each takes a player, by USB port. They have no vibration, player lights or Home button to quit. `DM_PAD_IDENTICAL=0` in `env.txt` turns this off.
 
+A controller with player lights (a Switch Pro Controller, a DualSense) shows its player number on the Mac and on iOS: players 1 to 4 light their own, and the log says `controller '<name>': player lights N`. Apple's controller support has player indices only for players 1 to 4, so players 5 to 8 and controllers with no player have their player index cleared (checked on the Mac with a Switch Pro Controller; iOS device confirmation still open).
+
 On the Mac, if a single Switch Pro-compatible controller has a thumbstick that stays at zero in Apple's controller support while its raw HID report `0x30` moves, nxnative automatically switches that stick to the passive HID reader after a brief tilt while keeping buttons, vibration, motion and any working stick on GameController ([details](reference/services.md#switch-pro-controller-stick-stays-zero-in-gamecontroller)). Set `DM_PRO_STICKS=0` in `env.txt` to disable this fallback.
 
 With [Press a button to join](settings.md#press-a-button-to-join) on in the settings (`DM_PAD_PRESS_TO_JOIN=1` in `env.txt`), on the Mac and on iOS, a controller becomes a player only when one of its buttons is pressed, as the lowest player free: the players choose their order and how many play, over Bluetooth or USB, identical pads included, and a controller connected while the game runs joins at its first press. The log says `press a button to play`, then `a button pressed: player N`. The press that joins also reaches the game. When a game asks for more players than it sees, a prompt over the game says how many are wanted and joined and waits for the others: a controller that presses a button (or connects, with the setting off) joins, A finishes once enough are in, and B or Escape closes it, as on a Switch.
@@ -75,6 +79,10 @@ Joy-Con 2 and the Pro Controller 2 do not appear in macOS's Bluetooth settings: 
 **Pairs and singles.** A left and a right Joy-Con 2 that connect play together as one pair. To make one of a pair a player of its own, held sideways, hold its **SL and SR** (the small rail buttons) for three seconds; to pair two single Joy-Cons again, hold **L** on the left one and **R** on the right one together for three seconds. The player lights show the new player numbers. A game that asks for more players than there are controllers splits a pair itself, as on a Switch (Super Mario Bros. Wonder's two-player screen). The game sees Joy-Cons as Joy-Cons: a pair is a dual controller with a sensor in each Joy-Con, a single one a sideways Joy-Con with its own sensor and rail buttons; a game that knows no Joy-Cons reads them as a Pro Controller. The gyro works, and so does rumble: each Joy-Con of a pair plays its side, a Joy-Con alone plays both, and **Game rumble**, **Rumble strength** and **Rumble cutoff** apply. Hold **Home** for two seconds for the quit prompt, as on other controllers. Each game app asks for Bluetooth access once. An app packed again asks again: macOS ties the answer to the app's signature, and the NSP script signs each build anew, so the same bundle ID does not carry it over. Not yet: the Joy-Con 2's mouse sensor. On a Pro Controller 2, pairing, every button, the sticks and Home are checked, and its rumble is [checked in Echoes of Wisdom](../dm/games/01008CF01BAAC000/README.md#controller-rumble); its gyro scale and axes are borrowed from the Joy-Con 2 and the Pro Controller, not measured on it.
 
 The mouse pointer hides when you press a key or a controller button, or move a stick, while it is over the game picture. Moving the mouse shows it again, as does switching to another window or app.
+
+### Switch 2 controllers (iPhone and iPad)
+
+The same setting, **Switch 2 controllers**, plays Joy-Con 2 and the Pro Controller 2 on iPhone and iPad. iOS does not give an app the device's own Bluetooth address, which a controller needs to wake toward it, so a controller is used without pairing: **hold its Sync button after each start of the game**, until its player lights sweep. A press of a button alone does not connect it. The rest (pairs and singles, rumble, motion) is the Mac's code, and the touch controls hide while a controller is connected.
 
 ## Shaders on first sight
 

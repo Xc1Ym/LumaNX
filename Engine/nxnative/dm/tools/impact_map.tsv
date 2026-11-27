@@ -37,6 +37,7 @@ scripts/pack_nup.py	*:*	NUP packing: games built from NUP containers
 scripts/bench.py	-	the benchmark
 scripts/push_romfs.sh	*:*	RomFS transfer: every game's iOS build
 scripts/regress.py	-	the regression harness
+scripts/bug_report.py	-	the bug report collector (reads logs and stamps, runs no game)
 scripts/cheat_anchor.py	-	cheat files carried between builds offline: no game runs it
 scripts/prepare_mod.py	-	offline mod exefs rewriter: no game runs it
 dm/tools/usage.py	-	the usage manifests
@@ -140,6 +141,7 @@ dm/gfx/tools/kit.py	shader:stage:*	KIT archive input to shader scanning
 dm/gfx/tools/dmsh_mesh.py	shader:stage:gs	passthrough geometry composed into a mesh shader
 dm/host/hle_fpslock.c	present:*	build-gated engine frame limits and dynamic resolution
 dm/host/hle_uecvar.c	present:*	Unreal console variables found by name; the texture pool (profile ue_texture_pool)
+dm/tools/ue_cvar.py	present:*	Unreal console-variable fixups for frame limits, present intervals and texture pools
 dm/gfx/tools/mvgl.py	api:gl	MVGL archive input to OpenGL shader scanning
 dm/gfx/tools/mvgl.py	shader:stage:*	MVGL archive input to NVN shader scanning
 dm/gfx/tools/smash_arc.py	*:*	Smash archive input to shader and NRO scanning
@@ -165,7 +167,8 @@ dm/host/front_mac.m	present:*	the Mac front end
 dm/host/front_role.h	present:*	task scheduling for windowless Mac games
 dm/host/dm_input.h	hle:*hid*	the shared input interface
 dm/host/motion_apple.h	hle:*SixAxisSensor*	controller motion supplied by GameController
-dm/host/pad_apple.h	hle:*hid*	controller face buttons from GameController
+dm/host/pad_apple.h	hle:*hid*	controller face buttons and player lights from GameController
+dm/host/pad_hid_mac.h	hle:*hid*	raw HID gamepads on the Mac: discovery, reports, players
 dm/host/motion_fusion.h	hle:*SixAxisSensor*	six-axis motion mapping and orientation
 dm/host/motion_pro.h	hle:*SixAxisSensor*	passive Switch Pro, DualShock 4 and 8BitDo Ultimate 2 Wireless IMU decoders
 dm/host/motion_pro_mac.h	hle:*SixAxisSensor*	Mac Switch Pro, DualShock 4 and 8BitDo Ultimate 2 Wireless raw motion transport and routing
