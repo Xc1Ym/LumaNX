@@ -214,7 +214,8 @@ def catalog(c):
     from incremental import pipeline_version
     pipeline=pipeline_version()
     for g in cat['games']:
-        g['missing']=requirements(g,ps.get(g['id']),bool(selected_engine and selected_engine.get('derivedProfiles'))); g['compatibility']=ps.get(g['id'],{}).get('compatibility','unsupported')
+        g['buildMissing']=requirements(g,ps.get(g['id']),bool(selected_engine and selected_engine.get('derivedProfiles')))
+        g['missing']=list(g['buildMissing']); g['compatibility']=ps.get(g['id'],{}).get('compatibility','unsupported')
         p=ps.get(g['id'])
         from derived import plan
         strategy=plan(g,p,bool(selected_engine and selected_engine.get('derivedProfiles'))) if p else {}
@@ -225,9 +226,15 @@ def catalog(c):
         manifest=read(c.library/'games'/g['id']/'current/manifest.json',{})
         cover=c.library/'games'/g['id']/'cover.jpg'; g['cover']=str(cover) if cover.exists() else ''
         g['ready']=bool(manifest)
-        g['runtimeVersion']=manifest.get('version','')
+        archive=g.get('runtimeArchive',{})
+        g['archived']=bool(archive.get('path')) and not g['ready']
+        g['archivePath']=archive.get('path')
+        g['archiveSize']=archive.get('size')
+        g['restoreSize']=archive.get('runtimeSize')
+        if g['ready'] or g['archived']: g['missing']=[]
+        g['runtimeVersion']=manifest.get('version','') or archive.get('version','')
         g['inputConfig']=manifest.get('inputConfig',True) if manifest else bool(selected_engine and selected_engine['inputConfig'])
-        g['needsPreparation']=bool(manifest) and (selected_engine is not None and manifest.get('engine') != selected_engine['fingerprint'] or manifest.get('sourceHashes') != sorted(x['sha256'] for x in g['packages']))
+        g['needsPreparation']=bool(manifest) and (selected_engine is not None and manifest.get('engine') != selected_engine['fingerprint'] or bool(g['packages']) and manifest.get('sourceHashes') != sorted(x['sha256'] for x in g['packages']))
         if manifest and manifest.get('pipeline')!=pipeline: g['needsPreparation']=True
     cat['profiles']=[{'id':x['id'],'name':x['name'],'compatibility':x['compatibility'],'version':x['builds'].get(x['package'],{}).get('display','')} for x in ps.values()]
     cat['jobs']=[read(p) for p in (c.private/'jobs').glob('*.json') if p!=c.jobpath]

@@ -84,6 +84,7 @@ class Context:
         self.r = request; self.task = request.get('taskId', uuid.uuid4().hex); self.stage = ''; self.number = 0; self.count = 0
         self.t0 = time.monotonic(); self.stage_t = self.t0; self.last = 0; self.cancelled = False; self.children = set(); self.guard = threading.RLock()
         self.last_log = None
+        self.last_output_at = None
         self.private = Path(request['privateRoot']).expanduser().resolve(); self.private.mkdir(parents=True, exist_ok=True, mode=0o700)
         os.chmod(self.private, 0o700)
         self.jobpath = self.private / 'jobs' / (self.task + '.json')
@@ -115,6 +116,7 @@ class Context:
             event = {'schema': 1, 'taskId': self.task, 'operation':self.r['operation'],'gameId':self.r.get('gameId'),'started':self.job['started'],'type': kind, 'stage': self.stage, 'stageIndex': self.number, 'stageCount': self.count, 'message': message, 'elapsed': time.monotonic()-self.stage_t}
             if done is not None: event['done'] = done
             if total and total > 0: event['total'] = total
+            if kind == 'heartbeat' and self.last_output_at is not None: event['outputAt'] = self.last_output_at
             event.update(kw)
             if getattr(self,'milestones',None):
                 event['milestone']=self.milestone
@@ -198,7 +200,7 @@ class Context:
             self.children.add(p)
             try:
                 for line in p.stdout:
-                    f.write(line); f.flush(); self.check()
+                    f.write(line); f.flush(); self.last_output_at=time.time(); self.check()
                     output.feed(line)
                     if line.startswith('NSMAC_PROGRESS '):
                         v = json.loads(line[15:]); self.emit(done=v['done'], total=v['total'], unit=v.get('unit',''))

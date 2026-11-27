@@ -156,6 +156,12 @@ struct GameDetail: View {
             }
             if game.ready==true {
                 Button {store.launch(game)} label:{Label(L("启动游戏"),systemImage:"play.fill").frame(maxWidth:.infinity)}.buttonStyle(.glassProminent).controlSize(.large).disabled(store.executionBusy || !store.queue.isEmpty)
+            } else if game.archived==true {
+                Label(L("已归档到 NAS，恢复到本地后可启动。"),systemImage:"externaldrive").font(.caption).foregroundStyle(.secondary)
+                if let archiveSize=game.archiveSize,let restoreSize=game.restoreSize {
+                    Text(L("NAS 归档：")+ByteCountFormatter.string(fromByteCount:archiveSize,countStyle:.file)+L("；恢复后本地：")+ByteCountFormatter.string(fromByteCount:restoreSize,countStyle:.file)).font(.caption).foregroundStyle(.secondary)
+                }
+                Button {store.restoreGame(game)} label:{Label(L("恢复到本地"),systemImage:"arrow.down.to.line").frame(maxWidth:.infinity)}.buttonStyle(.glassProminent).controlSize(.large).disabled(store.executionBusy || !store.queue.isEmpty)
             } else {
                 Button {store.enqueue(game)} label:{Label(L("准备运行文件"),systemImage:"hammer").frame(maxWidth:.infinity)}.buttonStyle(.glassProminent).controlSize(.large).disabled(!game.buildable)
                 if !(game.missing ?? []).isEmpty {
@@ -173,6 +179,13 @@ struct GameDetail: View {
                         Label(L("准备条件未满足"),systemImage:"exclamationmark.triangle").font(.subheadline).foregroundStyle(.orange)
                         ForEach(game.missing ?? [],id:\.self){Text(L($0)).font(.caption)}
                         Text(L("当前 nxnative 配置要求指定版本及着色器素材；这与 DLC 或本体是否完整无关。")).font(.caption).foregroundStyle(.secondary)
+                    }
+                    if (game.ready==true || game.archived==true),game.packages.isEmpty {
+                        Text(L("已编译游戏无需源文件即可游玩。添加更新或 DLC 前需重新导入源文件。")).font(.caption).foregroundStyle(.secondary)
+                    }
+                    if (game.ready==true || game.archived==true),!game.packages.isEmpty,!(game.buildMissing ?? []).isEmpty {
+                        Label(L("重新构建所需内容"),systemImage:"hammer").font(.caption).foregroundStyle(.secondary)
+                        ForEach(game.buildMissing ?? [],id:\.self){Text(L($0)).font(.caption).foregroundStyle(.secondary)}
                     }
                     if !game.packages.isEmpty {
                         Divider()
@@ -213,7 +226,7 @@ struct GameDetail: View {
         } message:{Text(L("仅处理托管副本；原始文件、存档和上次成功的运行版本保留。其他游戏仍在引用的共享文件会保留。"))}
     }
     private var displayedVersion:String {
-        if game.ready==true,let version=game.runtimeVersion,!version.isEmpty {return version}
+        if (game.ready==true || game.archived==true),let version=game.runtimeVersion,!version.isEmpty {return version}
         return game.display.isEmpty ? L("版本待识别") : game.display
     }
     private var gameTools:some View {
@@ -249,6 +262,13 @@ struct GameDetail: View {
                 if game.id=="01007EF00011E000" {
                     Button {store.migrate(game)} label:{GameToolLabel(title:"迁移已有旷野之息构建…",symbol:"arrow.down.doc",accessory:"chevron.right")}
                         .disabled(store.executionBusy)
+                    toolDivider
+                }
+                if game.ready==true {
+                    Button {store.archiveGame(game)} label:{GameToolLabel(title:"归档到 NAS…",symbol:"externaldrive.badge.plus")}.disabled(store.executionBusy || !store.queue.isEmpty)
+                    toolDivider
+                } else if game.archived==true {
+                    Button {store.restoreGame(game)} label:{GameToolLabel(title:"恢复到本地",symbol:"arrow.down.to.line")}.disabled(store.executionBusy || !store.queue.isEmpty)
                     toolDivider
                 }
                 DisclosureGroup {
@@ -391,6 +411,11 @@ struct TaskCard: View {
                 }
                 StatusPill(title:task.stateName,symbol:task.active ? "circle.dotted" : "circle.fill",color:task.hasWarnings || task.state=="failed" ? .orange : .secondary)
                 if task.active {
+                    if store.canPause(task) {
+                        Button(task.state == "paused" ? L("继续任务") : L("暂停任务")) {store.togglePause(task)}
+                            .controlSize(.small)
+                            .help(L("暂停保留当前进程；退出应用仍会取消任务。"))
+                    }
                     Button(task.operation=="launch" ? L("结束游戏") : L("取消任务")) {store.cancel(task)}.disabled(task.state=="cancelling").controlSize(.small)
                 } else if ["failed","interrupted","cancelled"].contains(task.state),task.gameId != nil || task.conversion != nil || task.importPaths != nil {
                     Button(L("重试")) {store.retry(task)}.disabled(store.executionBusy).controlSize(.small)
