@@ -102,6 +102,10 @@ static unsigned motion_clears[DM_PLAYERS], hid_motion_clears[DM_PLAYERS], joy_mo
 void dm_motion_clear(int p) {assert(p>=0&&p<DM_PLAYERS);motion_clears[p]++;}
 void dm_motion_clear_hid(int p) {assert(p>=0&&p<DM_PLAYERS);hid_motion_clears[p]++;}
 void dm_motion_clear_joy(int p,int side) {assert(p>=0&&p<DM_PLAYERS&&side>=0&&side<2);joy_motion_clears[p][side]++;}
+// Stick motion belongs to the HID service. The input harness never opens the
+// game menu, and the engine's t_hid covers the real setting and sensor output.
+int dm_stick_motion_enabled(void) {abort();}
+void dm_stick_motion_set(int enabled) {(void)enabled;abort();}
 uint64_t now_ns(void) {
     struct timespec t;assert(clock_gettime(CLOCK_MONOTONIC_RAW,&t)==0);
     return (uint64_t)t.tv_sec*1000000000ull+(uint64_t)t.tv_nsec;
