@@ -31,6 +31,43 @@ import XCTest
         XCTAssertTrue(store.tasks[0].hasWarnings);XCTAssertEqual(store.tasks[0].stateName,L("完成（有警告）"))
         XCTAssertNil(store.error)
     }
+    func testExitingWorkerDeliversFinalResultAndBootstrapDiagnostics() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("lumanx-worker-" + UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let executable = root.appendingPathComponent("Runtime/python/bin/python3")
+        try FileManager.default.createDirectory(at: executable.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try #"""
+        #!/bin/sh
+        id=${5##*/}
+        id=${id%.json}
+        if /usr/bin/grep -q 'failingFixture' "$5"; then
+            printf 'fixture bootstrap error\n' >&2
+            exit 1
+        fi
+        printf '{"schema":1,"taskId":"%s","type":"result","state":"completed","result":{"value":"final"}}\n' "$id"
+        """#.write(to: executable, atomically: true, encoding: .utf8)
+        try FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: executable.path)
+
+        let store = Store(privateRoot: root.appendingPathComponent("private"), resources: root)
+        var delivered: [String] = []
+        let successful = (0..<8).map { _ in
+            store.worker("fixture") { result in
+                if let value = result["value"] as? String { delivered.append(value) }
+            }
+        }
+        let failed = store.worker("failingFixture")
+        let deadline = Date().addingTimeInterval(5)
+        while !store.processes.isEmpty, Date() < deadline { try await Task.sleep(for: .milliseconds(10)) }
+
+        XCTAssertTrue(store.processes.isEmpty)
+        XCTAssertEqual(delivered, Array(repeating: "final", count: successful.count))
+        for id in successful {
+            XCTAssertEqual(store.tasks.first { $0.id == id }?.state, "completed")
+        }
+        XCTAssertEqual(store.tasks.first { $0.id == failed }?.state, "interrupted")
+        let log = store.privateRoot.appendingPathComponent("logs/\(failed)-bootstrap.log")
+        XCTAssertEqual(try String(contentsOf: log, encoding: .utf8), "fixture bootstrap error\n")
+    }
     func testLegacyJobsDecodeAndLogLinksStayWithinManagedLogLocations() throws {
         let legacy=try JSONDecoder().decode(TaskRecord.self,from:Data(#"{"id":"old","operation":"build","state":"failed"}"#.utf8))
         XCTAssertNil(legacy.diagnostics)

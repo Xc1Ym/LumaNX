@@ -421,50 +421,66 @@ final class WorkerOutput: @unchecked Sendable {
             var env = ProcessInfo.processInfo.environment; env["PYTHONUNBUFFERED"] = "1"; env["PYTHONDONTWRITEBYTECODE"] = "1"; env["PYTHONNOUSERSITE"] = "1"; env.removeValue(forKey:"PYTHONPATH"); env.removeValue(forKey:"PYTHONHOME"); process.environment = env
             let pipe = Pipe(); process.standardOutput = pipe; let err = Pipe(); process.standardError = err
             let output = WorkerOutput()
-            pipe.fileHandleForReading.readabilityHandler = { handle in
-                let chunk = handle.availableData
-                if chunk.isEmpty { return }
-                let lines = output.append(chunk)
-                for line in lines {
-                    guard let e = (try? JSONSerialization.jsonObject(with:line)) as? [String:Any] else { continue }
-                    DispatchQueue.main.async { self.event(e,visible:visible) }
+            let streams = DispatchGroup()
+            streams.enter()
+            streams.enter()
+            let finish: @MainActor @Sendable (Int32) -> Void = { status in
+                self.processes[id] = nil; try? FileManager.default.removeItem(at:file)
+                if operation=="catalog" {self.catalogWorkers=max(0,self.catalogWorkers-1)}
+                if operation=="converterStatus" {self.checkingConverter=false}
+                self.lastWorkerEvent[id] = nil
+                if let i = self.tasks.firstIndex(where:{$0.id == id}), self.tasks[i].active {
+                    self.tasks[i].state = status == 130 ? "cancelled" : "interrupted"; self.tasks[i].message = "工作进程已退出。可重试并验证完成阶段。"
+                    if status != 130 {
+                        let log=self.privateRoot.appendingPathComponent("logs/\(id)-bootstrap.log")
+                        try? FileManager.default.createDirectory(at:log.deletingLastPathComponent(),withIntermediateDirectories:true)
+                        try? output.errorText.write(to:log,atomically:true,encoding:.utf8)
+                        self.tasks[i].diagnostics=[self.nativeDiagnostic(code:"worker_interrupted",summary:"工作进程已退出。可重试并验证完成阶段。",detail:output.errorText,logPath:log.path)]
+                        self.persistTask(self.tasks[i])
+                        self.errorDiagnostic=self.tasks[i].diagnostics?.last
+                        self.error=self.tasks[i].message
+                    }
+                    if operation == "preflight" { self.failEnvironmentBootstrap(output.errorText.isEmpty ? "工作进程已退出。可重试并验证完成阶段。" : output.errorText) }
                 }
+                self.callbacks[id] = nil
+                if self.executionTask == id {
+                    self.executionTask = nil
+                    if !["prepareEngine","installMetal","uninstallMetal"].contains(operation) { self.startNext() }
+                }
+                if operation == "import" { self.startNext() }
+                if ["prepareEngine","installMetal","uninstallMetal"].contains(operation) { self.checkEnvironment() }
+                if visible { self.refresh() }
             }
-            // Drain stderr so a failed Python bootstrap cannot block the child.
-            err.fileHandleForReading.readabilityHandler = { h in output.error(h.availableData) }
             process.terminationHandler = { p in
-                pipe.fileHandleForReading.readabilityHandler = nil; err.fileHandleForReading.readabilityHandler = nil
-                DispatchQueue.main.asyncAfter(deadline:.now()+0.15) {
-                    self.processes[id] = nil; try? FileManager.default.removeItem(at:file)
-                    if operation=="catalog" {self.catalogWorkers=max(0,self.catalogWorkers-1)}
-                    if operation=="converterStatus" {self.checkingConverter=false}
-                    self.lastWorkerEvent[id] = nil
-                    if let i = self.tasks.firstIndex(where:{$0.id == id}), self.tasks[i].active {
-                        self.tasks[i].state = p.terminationStatus == 130 ? "cancelled" : "interrupted"; self.tasks[i].message = "工作进程已退出。可重试并验证完成阶段。"
-                        if p.terminationStatus != 130 {
-                            let log=self.privateRoot.appendingPathComponent("logs/\(id)-bootstrap.log")
-                            try? FileManager.default.createDirectory(at:log.deletingLastPathComponent(),withIntermediateDirectories:true)
-                            try? output.errorText.write(to:log,atomically:true,encoding:.utf8)
-                            self.tasks[i].diagnostics=[self.nativeDiagnostic(code:"worker_interrupted",summary:"工作进程已退出。可重试并验证完成阶段。",detail:output.errorText,logPath:log.path)]
-                            self.persistTask(self.tasks[i])
-                            self.errorDiagnostic=self.tasks[i].diagnostics?.last
-                            self.error=self.tasks[i].message
-                        }
-                        if operation == "preflight" { self.failEnvironmentBootstrap(output.errorText.isEmpty ? "工作进程已退出。可重试并验证完成阶段。" : output.errorText) }
-                    }
-                    self.callbacks[id] = nil
-                    if self.executionTask == id {
-                        self.executionTask = nil
-                        if !["prepareEngine","installMetal","uninstallMetal"].contains(operation) { self.startNext() }
-                    }
-                    if operation == "import" { self.startNext() }
-                    if ["prepareEngine","installMetal","uninstallMetal"].contains(operation) { self.checkEnvironment() }
-                    if visible { self.refresh() }
-                }
+                let status = p.terminationStatus
+                // The stdout reader enqueues every event before it leaves the group.
+                streams.notify(queue: .main) { MainActor.assumeIsolated { finish(status) } }
             }
             if visible { tasks.insert(.init(id:id,operation:operation,state:"running",gameId:extra["gameId"] as? String,started:Date().timeIntervalSince1970,outputPath:extra["outputPath"] as? String,conversion:Self.decode(ConversionJob.self,extra["conversion"]),importPaths:operation == "import" ? extra["paths"] as? [String] : nil,backupId:extra["backupId"] as? String,releaseId:extra["releaseId"] as? String,libraryId:preferences.libraryId),at:0) }
             callbacks[id] = completion; processes[id] = process
             try process.run()
+            pipe.fileHandleForReading.readabilityHandler = { handle in
+                let chunk = handle.availableData
+                if chunk.isEmpty {
+                    handle.readabilityHandler = nil
+                    streams.leave()
+                    return
+                }
+                for line in output.append(chunk) {
+                    guard let e = (try? JSONSerialization.jsonObject(with:line)) as? [String:Any] else { continue }
+                    DispatchQueue.main.async { self.event(e,visible:visible) }
+                }
+            }
+            // Drain stderr concurrently, including the final bootstrap diagnostics.
+            err.fileHandleForReading.readabilityHandler = { handle in
+                let chunk = handle.availableData
+                if chunk.isEmpty {
+                    handle.readabilityHandler = nil
+                    streams.leave()
+                    return
+                }
+                output.error(chunk)
+            }
             if operation == "preflight" {lastWorkerEvent[id]=Date();watchEnvironmentWorker(id)}
         } catch {
             if operation=="converterStatus" {checkingConverter=false}
